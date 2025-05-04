@@ -1,9 +1,18 @@
+.env
+.DS_Store
 .vagrant/
 .vscode
 
 /bin/*
-/node_modules/*
+node_modules/
+audio_files/generated/pcm/*
+audio_files/generated/tts/*
+audio_files/generated/wav/*
+audio_files/generated/youtube/*
+chat_history/*
 storage/
+
+cookies.json
 
 config.json
 database.json
