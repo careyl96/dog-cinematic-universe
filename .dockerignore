@@ -1,0 +1,12 @@
+node_modules/
+audio_files/generated/pcm/*
+audio_files/generated/tts/*
+audio_files/generated/wav/*
+audio_files/generated/youtube/*
+chat_history/*
+.env
+
+npm-debug.log
+.DS_Store
+.vscode
+logs
