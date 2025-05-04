@@ -4,8 +4,9 @@ audio_files/generated/tts/*
 audio_files/generated/wav/*
 audio_files/generated/youtube/*
 chat_history/*
-.env
+c
 
+.env
 npm-debug.log
 .DS_Store
 .vscode

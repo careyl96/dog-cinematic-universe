@@ -15,10 +15,7 @@ export const chunkifyText = (text: string, maxCharactersPerChunk = 4096) => {
     // Check if adding this token would exceed the max chunk size based on character count
     if ((currentChunk + token).length > maxCharactersPerChunk) {
       // Try to preserve paragraph structure (split at paragraphs or significant breaks)
-      if (
-        /\n\s*\n/.test(token) ||
-        (/\n/.test(currentChunk) && /\n/.test(token))
-      ) {
+      if (/\n\s*\n/.test(token) || (/\n/.test(currentChunk) && /\n/.test(token))) {
         chunks.push(currentChunk.trim())
         currentChunk = token // Start a new chunk
       } else {
@@ -41,14 +38,28 @@ export const chunkifyText = (text: string, maxCharactersPerChunk = 4096) => {
 export const sanitizeInputText = (text: string) => {
   if (typeof text !== 'string') return ''
 
-  // Remove null bytes
-  text = text.replace(/\0/g, '')
+  // Regex to match URLs
+  const urlRegex = /\b(?:https?:\/\/|www\.)\S+\b/g
 
-  // Normalize whitespace
-  text = text.replace(/\s+/g, ' ').trim()
+  // Extract all URLs
+  const urls = text.match(urlRegex) || []
 
-  // Escape special characters (useful for JSON or certain file formats)
-  text = text.replace(/\\/g, '\\\\').replace(/"/g, '\\"')
+  // Temporarily replace URLs with placeholders
+  let index = 0
+  text = text.replace(urlRegex, () => `__URL_PLACEHOLDER_${index++}__`)
+
+  // Sanitize the non-URL text
+  text = text
+    .replace(/\0/g, '') // Remove null bytes
+    .replace(/\s+/g, ' ')
+    .trim() // Normalize whitespace
+    .replace(/\\/g, '\\\\') // Escape backslashes
+    .replace(/"/g, '\\"') // Escape quotes
+
+  // Restore URLs
+  urls.forEach((url, i) => {
+    text = text.replace(`__URL_PLACEHOLDER_${i}__`, url)
+  })
 
   return text
 }
@@ -64,24 +75,6 @@ export const isSingleWord = (text: string): boolean => {
   return !/\s/.test(text)
 }
 
-export const shuffle = (array: any) => {
-  let currentIndex = array.length
-
-  // While there remain elements to shuffle...
-  while (currentIndex != 0) {
-    // Pick a remaining element...
-    let randomIndex = Math.floor(Math.random() * currentIndex)
-    currentIndex--
-
-    // And swap it with the current element.
-    ;[array[currentIndex], array[randomIndex]] = [
-      array[randomIndex],
-      array[currentIndex],
-    ]
-  }
-  return array
-}
-
 export const getCurrentTimestamp = () => {
   const now = new Date(Date.now())
 
@@ -91,4 +84,34 @@ export const getCurrentTimestamp = () => {
     minute: '2-digit',
     second: '2-digit',
   })
+}
+
+export const stripTimeFromTitle = (title: string): string => {
+  return title.replace(/\s*-\s*\(\d+:\d+\)\s*$/, '').trim()
+}
+
+export const flattenCommandList = (commands: Record<string, string[]>): string[] => {
+  return Object.values(commands).flat()
+}
+
+export const cleanMarkdown = (text: string): string => {
+  return text
+    .replace(/^#{1,6}\s*(.+)$/gm, '\n\n**$1**') // Replace headers (## or ### etc.) with bold text (e.g., **Header**)
+    .replace(/\[\d+(?:,\s*\d+)*\]/g, '') // Remove inline references like [1, 2, 3]
+    .replace(/\n{3,}/g, '\n\n') // Clean up excessive newlines
+    .trim() // Trim leading/trailing whitespace
+}
+
+export const removeFirstIntentWord = (sentence: string, intents: string[]) => {
+  if (!sentence) return sentence
+
+  const words = sentence.trim().split(/\s+/)
+  if (words.length === 0) return sentence
+
+  // Check if the first word matches any intent
+  if (intents.includes(words[0].toLowerCase())) {
+    words.shift() // Remove the first word
+  }
+
+  return words.join(' ')
 }

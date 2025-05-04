@@ -1,9 +1,4 @@
-import {
-  ChatInputCommandInteraction,
-  EmbedBuilder,
-  InteractionContextType,
-  SlashCommandBuilder,
-} from 'discord.js'
+import { ChatInputCommandInteraction, EmbedBuilder, InteractionContextType, SlashCommandBuilder } from 'discord.js'
 import { ClientWithCommands } from '../../ClientWithCommands'
 
 export default {
@@ -14,11 +9,9 @@ export default {
   async execute(interaction: ChatInputCommandInteraction) {
     const client = interaction.client as ClientWithCommands
     try {
-      client.musicPlayer?.clearQueue()
+      await client.musicPlayer?.clearQueue()
 
-      const queueEmbed = new EmbedBuilder()
-        .setColor(0xffa200)
-        .setDescription('Queue has been cleared')
+      const queueEmbed = new EmbedBuilder().setColor(0xffa200).setDescription('Queue has been cleared')
       await interaction.reply({ embeds: [queueEmbed] })
     } catch (err) {
       console.error(err)

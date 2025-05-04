@@ -1,42 +1,39 @@
 import { InteractionContextType, SlashCommandBuilder } from 'discord.js'
-import { createChatCompletion } from '../../groq/groq'
-import { createGroqEmbed, createRawEmbed } from '../../helpers/embeds'
+import { handleGroqSlashCommand } from '../../groq/groq'
+import { createGroqEmbed, createRawEmbed } from '../../helpers/embedHelpers'
 import { chunkifyText, getCharacterCount } from '../../helpers/formatterHelpers'
+import { BOT_USER_ID } from '../../constants'
 
 export default {
   data: new SlashCommandBuilder()
     .setName('groq')
     .setDescription('ChatGPT but not')
     .setContexts(InteractionContextType.Guild)
-    .addStringOption((option) =>
-      option
-        .setName('query')
-        .setDescription('Ask me a question')
-        .setRequired(true)
-    )
+    .addStringOption((option) => option.setName('query').setDescription('Ask me a question').setRequired(true))
     .addStringOption((option) =>
       option
         .setName('model')
-        .setDescription('Choose a language model (default: qwen-qwq-32b)')
+        .setDescription('Choose a language model (default: llama-3.3-70b-versatile)')
         .addChoices([
           { name: 'qwen-qwq-32b', value: 'qwen-qwq-32b' },
-          { name: 'qwen-2.5-coder-32b', value: 'qwen-2.5-coder-32b' },
-          { name: 'llama3-70b-8192', value: 'llama3-70b-8192' },
+          { name: 'llama-3.3-70b-versatile', value: 'llama-3.3-70b-versatile' },
           {
             name: 'deepseek-r1-distill-llama-70b',
             value: 'deepseek-r1-distill-llama-70b',
+          },
+          {
+            name: 'deepseek-r1-distill-qwen-32b',
+            value: 'deepseek-r1-distill-qwen-32b',
           },
         ])
         .setRequired(false)
     ),
   async execute(interaction: any) {
     const query = interaction.options.getString('query')!
-    const model = interaction.options.getString('model') || 'qwen-qwq-32b'
+    const model = interaction.options.getString('model') || 'llama-3.3-70b-versatile'
     const userId = interaction.user.id
 
-    const response =
-      (await createChatCompletion({ message: query, model, userId })) ||
-      'Error :('
+    const response = (await handleGroqSlashCommand({ message: query, model, userId: BOT_USER_ID })) || 'Error :('
 
     // chunk response into multiple embeds since each embed can only have 4096 characters
     // https://discordjs.guide/popular-topics/embeds.html#embed-limits
@@ -58,9 +55,7 @@ export default {
         })
       )
 
-      const chunkedResponse = chunkifyText(response).map((chunk: string) =>
-        createRawEmbed(chunk)
-      )
+      const chunkedResponse = chunkifyText(response).map((chunk: string) => createRawEmbed(chunk))
 
       for (let chunk of chunkedResponse) {
         await interaction.channel.send({

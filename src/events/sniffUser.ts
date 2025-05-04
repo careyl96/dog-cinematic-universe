@@ -1,15 +1,12 @@
 import { Events, VoiceState, VoiceChannel } from 'discord.js'
 import { ClientWithCommands } from '../ClientWithCommands'
 import { getCurrentTimestamp } from '../helpers/formatterHelpers'
+import { BOT_USER_ID } from '../constants'
 
 export default {
   name: Events.VoiceStateUpdate,
   once: false,
-  async execute(
-    client: ClientWithCommands,
-    oldVoiceState: VoiceState,
-    newVoiceState: VoiceState
-  ) {
+  async execute(client: ClientWithCommands, oldVoiceState: VoiceState, newVoiceState: VoiceState) {
     client.listenForVoiceCommands()
 
     const member = newVoiceState.member || oldVoiceState.member
@@ -18,21 +15,18 @@ export default {
     const newChannel = newVoiceState.channel
 
     // Ignore if user did not change channels and bot is already connected
-    if (
-      oldVoiceState.channelId === newVoiceState.channelId &&
-      !!client.connection
-    )
-      return
+    if (oldVoiceState.channelId === newVoiceState.channelId && !!client.connection) return
 
     // Log user voice activity
     if (!oldChannel && newChannel) {
       console.log(`[${getCurrentTimestamp()}] ✅ ${username} joined "${newChannel.name}" ✅`)
     } else if (oldChannel && !newChannel) {
       console.log(`[${getCurrentTimestamp()}] ❌ ${username} disconnected" ❌`)
+      if (member.user.id === BOT_USER_ID) {
+        client.disconnect()
+      }
     } else if (oldChannel?.id !== newChannel?.id) {
-      console.log(
-        `[${getCurrentTimestamp()}] 👉 ${username} moved from "${oldChannel?.name}" to "${newChannel?.name}"`
-      )
+      console.log(`[${getCurrentTimestamp()}] 👉 ${username} moved from "${oldChannel?.name}" to "${newChannel?.name}"`)
     }
 
     // Handle empty channel after someone leaves

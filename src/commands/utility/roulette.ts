@@ -1,13 +1,8 @@
 import { InteractionContextType, SlashCommandBuilder } from 'discord.js'
-import { PATH, TEXT_CHANNELS } from '../../constants'
-import { existsSync, readFileSync } from 'fs'
-import { queue } from '../../helpers/playerFunctions'
-import {
-  fetchMessages,
-  filterAndFormatMessages,
-} from '../../helpers/seedMusicHistory'
-import { shuffle } from '../../helpers/formatterHelpers'
+import { queue, roulette } from '../../helpers/playerFunctions'
 import { createYoutubeUrlFromId } from '../../helpers/youtubeHelpers/youtubeFormatterHelpers'
+import { getUserMusicHistory } from '../../helpers/musicDataHelpers'
+import { getGuildMember } from '../../helpers/otherHelpers'
 
 export default {
   data: new SlashCommandBuilder()
@@ -15,11 +10,7 @@ export default {
     .setDescription('Plays random previously played tracks')
     .setContexts(InteractionContextType.Guild)
     .addIntegerOption((option) =>
-      option
-        .setName('count')
-        .setMaxValue(10)
-        .setDescription('Number of random songs to queue')
-        .setRequired(false)
+      option.setName('count').setMaxValue(50).setDescription('Number of random songs to queue').setRequired(false)
     )
     .addStringOption((option) =>
       option
@@ -28,58 +19,44 @@ export default {
         .setRequired(false)
         .addChoices([
           { name: 'Carey', value: '118585025905164291' },
+          { name: 'Alan', value: '119671396807737347' },
           { name: 'Rudy', value: '119718851402268674' },
           { name: 'Jesse', value: '120031401948086272' },
           { name: 'Steven', value: '121543449664159744' },
           { name: 'Tyler', value: '130770349234192384' },
           { name: 'Aurlin', value: '177932180725563392' },
+          { name: 'Johny', value: '258161760366886913' },
           { name: 'Chris', value: '298354211580674048' },
           { name: 'CLIFFORD', value: '333842059150753794' },
         ])
     ),
   async execute(interaction: any) {
-    const user = await interaction.guild!.members.fetch(interaction.user.id)
+    const user = await getGuildMember(interaction.user.id)
     const count = interaction.options.getInteger('count') || 1
     const userIdFilter = interaction.options.getString('user')
-
-    if (userIdFilter) {
-      const messageHistoryFilePath = `${PATH.MUSIC_BOT_HISTORY}/${userIdFilter}.json`
-      if (existsSync(messageHistoryFilePath)) {
-        const userMusicBotHistory = JSON.parse(
-          readFileSync(messageHistoryFilePath, 'utf-8')
-        )
-        const youtubeUrls = getRandomKeys(userMusicBotHistory, count).map(
-          (videoId) => createYoutubeUrlFromId(videoId)
-        )
-        await queue({
-          user,
-          query: youtubeUrls,
-          saveHistory: false,
-        })
-      }
-    } else {
-      const musicBotChannel = interaction.client.channels.cache.get(
-        TEXT_CHANNELS.MUSIC_BOT
-      )
-      const messages = await fetchMessages(musicBotChannel, 750)
-      let youtubeUrls = filterAndFormatMessages(messages).map(
-        (videoInfo) => videoInfo.url
-      )
-      youtubeUrls = shuffle([...new Set(youtubeUrls)]).slice(0, count)
-      await queue({
-        user,
-        query: youtubeUrls,
-        saveHistory: false,
-      })
-    }
 
     await interaction.followUp({
       allowedMentions: {
         parse: [],
       },
-      content:
-        `<@${interaction.user.id}> used </roulette:1356769593208606791> ${count}!`.trim(),
+      content: `<@${interaction.user.id}> used </roulette:1356769593208606791> ${count}!`.trim(),
     })
+
+    if (userIdFilter) {
+      const userMusicHistory = getUserMusicHistory(userIdFilter)
+      if (userMusicHistory) {
+        const youtubeUrls = getRandomKeys(userMusicHistory, count).map((videoId) => createYoutubeUrlFromId(videoId))
+
+        await queue({
+          user,
+          query: youtubeUrls,
+          saveHistory: false,
+          interaction,
+        })
+      }
+    } else {
+      await roulette(user.id, count)
+    }
   },
 }
 

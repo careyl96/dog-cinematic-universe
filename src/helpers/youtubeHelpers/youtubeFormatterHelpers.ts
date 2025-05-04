@@ -6,12 +6,12 @@ export interface FormattedYoutubeVideo {
   thumbnail: string
 }
 
-export const formatYoutubeVideoFromIdSearch = (
-  video: any
-): FormattedYoutubeVideo => {
+export const formatYoutubeVideoFromIdSearch = (video: any): FormattedYoutubeVideo => {
   const formattedVideo = {} as any
 
-  formattedVideo.title = video.snippet.title
+  let liveVideo = video.snippet.liveBroadcastContent === 'live'
+
+  formattedVideo.title = liveVideo ? `🔴 LIVE 🔴 - ${video.snippet.title}` : video.snippet.title
   formattedVideo.url = `https://www.youtube.com/watch?v=${video.id}`
   formattedVideo.id = video.id
   formattedVideo.duration = formatDuration(video.contentDetails.duration)
@@ -21,9 +21,7 @@ export const formatYoutubeVideoFromIdSearch = (
 }
 
 export const extractYouTubeIdFromUrl = (url: string) => {
-  let match = url.match(
-    /(?:youtube\.com\/(?:.*[?&]v=|embed\/|v\/|shorts\/)|youtu\.be\/)([^?&/]+)/
-  )
+  let match = url.match(/(?:youtube\.com\/(?:.*[?&]v=|embed\/|v\/|shorts\/)|youtu\.be\/)([^?&/]+)/)
 
   return match ? match[1] : ''
 }
@@ -36,7 +34,7 @@ export const formatDuration = (isoDuration: string) => {
   // Extract hours, minutes, and seconds using regex
   const match = isoDuration.match(/PT(?:(\d+)H)?(?:(\d+)M)?(?:(\d+)S)?/)
 
-  if (!match) return '0:00'
+  if (!match) return ''
 
   let hours = match[1] ? parseInt(match[1]) : 0
   let minutes = match[2] ? parseInt(match[2]) : 0
@@ -52,6 +50,20 @@ export const formatDuration = (isoDuration: string) => {
     .join(':') // Remove null values
 
   return formattedTime
+}
+
+export const parseTitleWithDurationToIso = (input: string) => {
+  const match = input.match(/\((\d+):(\d+)/)
+  if (!match) return null
+
+  const minutes = parseInt(match[1], 10)
+  const seconds = parseInt(match[2], 10)
+
+  let iso = 'PT'
+  if (minutes > 0) iso += `${minutes}M`
+  if (seconds > 0) iso += `${seconds}S`
+
+  return iso
 }
 
 export const isValidYoutubeUrl = (url: string): boolean => {
