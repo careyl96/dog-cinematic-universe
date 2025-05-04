@@ -11,7 +11,7 @@ import {
   formatYoutubeVideoFromIdSearch,
   isValidYoutubeUrl,
 } from './youtubeFormatterHelpers'
-import path from 'path'
+import { PassThrough } from 'stream'
 
 // fetches single youtube video via youtube api and returns formatted video for music player using videoId
 const fetchYoutubeVideoById = async (videoId: string) => {
@@ -94,7 +94,7 @@ export const fetchYoutubeVideoFromUrlOrQuery = async (options: {
     }
   }
 
-  const handleYtsFallback = async () => {
+  const useYtsFallback = async () => {
     console.log('##### Using yt-search fallback')
     if (playlistId) {
       console.log('###### Detected playlist URL')
@@ -105,23 +105,21 @@ export const fetchYoutubeVideoFromUrlOrQuery = async (options: {
 
   try {
     if (useYts) {
-      return await handleYtsFallback()
+      return await useYtsFallback()
     }
 
     if (playlistId) {
       return await fetchYoutubePlaylistById(playlistId)
     }
 
-    return isUrl
-      ? await fetchYoutubeVideoById(videoId!)
-      : await fetchYoutubeVideoByQuery(urlOrQuery)
+    return isUrl ? await fetchYoutubeVideoById(videoId!) : await fetchYoutubeVideoByQuery(urlOrQuery)
   } catch (err: any) {
     console.warn('YouTube API failed, falling back to yt-search')
     console.warn('Query:', urlOrQuery)
     if (videoId) console.warn('Extracted videoId:', videoId)
 
     try {
-      return await handleYtsFallback()
+      return await useYtsFallback()
     } catch (fallbackErr: any) {
       console.error('Both YouTube API and yt-search failed:', fallbackErr)
       throw new Error('Video unavailable')
@@ -131,15 +129,9 @@ export const fetchYoutubeVideoFromUrlOrQuery = async (options: {
 
 // @distube/ytdl-core, use if something goes wrong with youtube-dl-exec
 export const createYoutubeAudioStreamYtdl = (url: string): Readable => {
-  if (!url)
-    throw new Error('YouTube video URL is undefined (createYoutubeAudioStream)')
+  if (!url) throw new Error('YouTube video URL is undefined (createYoutubeAudioStream)')
 
-  const __dirname = path.resolve()
-
-  console.log(path.join(__dirname, 'cookies.json'))
-  const agent = ytdl.createAgent(
-    JSON.parse(fs.readFileSync('./cookies.json', 'utf-8'))
-  )
+  const agent = ytdl.createAgent(JSON.parse(fs.readFileSync('./cookies.json', 'utf-8')))
 
   const audioStream = ytdl(url, {
     filter: 'audioonly',
@@ -154,8 +146,7 @@ export const createYoutubeAudioStreamYtdl = (url: string): Readable => {
 // // creates the audio stream necessary for discord's audio player
 // // using youtube-dl-exec
 export const createYoutubeAudioStream = (url: string): Readable => {
-  if (!url)
-    throw new Error('YouTube video URL is undefined (createYoutubeAudioStream)')
+  if (!url) throw new Error('YouTube video URL is undefined (createYoutubeAudioStream)')
 
   const process = youtubeDl.exec(
     url,
@@ -164,16 +155,28 @@ export const createYoutubeAudioStream = (url: string): Readable => {
       format: 'bestaudio',
       noWarnings: true,
       ignoreErrors: true,
-      quiet: true,
+      quiet: false, // Set to false for verbose logs
       abortOnError: true,
       newline: true,
     },
     {
-      stdio: ['ignore', 'pipe', 'ignore'], // Ensure stdout is piped
+      stdio: ['ignore', 'pipe', 'ignore'],
     }
   )
 
   const audioStream = process.stdout
 
-  return audioStream
+  // Wrap the audio stream in a PassThrough to buffer and adjust the stream as needed
+  const bufferedStream = new PassThrough({
+    highWaterMark: 128 * 1024, // Adjust buffer size to 128KB
+  })
+
+  audioStream.pipe(bufferedStream)
+
+  // Error handling for the stream
+  audioStream.on('error', (err) => {
+    console.error('Audio stream error:', err)
+  })
+
+  return bufferedStream
 }

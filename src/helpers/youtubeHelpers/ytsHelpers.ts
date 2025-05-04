@@ -21,9 +21,7 @@ export const fetchViaYTS = async (
   return formatYTSFromQuerySearch(response.all[0])
 }
 
-export const fetchPlaylistViaYts = async (
-  playlistUrl: string
-): Promise<FormattedYoutubeVideo[]> => {
+export const fetchPlaylistViaYts = async (playlistUrl: string): Promise<FormattedYoutubeVideo[]> => {
   const parsedUrl = new URL(playlistUrl)
   const playlistId = parsedUrl.searchParams.get('list')
 
@@ -86,10 +84,11 @@ export const formatYTSFromQuerySearch = (video: any): FormattedYoutubeVideo => {
   // }
   const formattedVideo = {} as any
 
-  formattedVideo.title = video.title
+  let liveVideo = video.type === 'live'
+  formattedVideo.title = liveVideo ? `🔴 LIVE 🔴 - ${video.title}` : video.title
   formattedVideo.url = video.url || createYoutubeUrlFromId(video.videoId)
   formattedVideo.id = video.videoId
-  formattedVideo.duration = video.duration.timestamp
+  formattedVideo.duration = video.duration?.timestamp || ''
   formattedVideo.thumbnail = video.thumbnail
 
   return formattedVideo

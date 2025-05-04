@@ -50,7 +50,6 @@ const deployCommands = async () => {
       { body: commands }
     )
 
-    console.log(data)
     console.log(
       `Successfully reloaded ${data.length} application (/) commands.`
     )

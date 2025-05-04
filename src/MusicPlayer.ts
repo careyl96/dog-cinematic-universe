@@ -8,18 +8,14 @@ import {
 import { createYoutubeAudioStream } from './helpers/youtubeHelpers/youtubeHelpers'
 import { ChatInputCommandInteraction, Message, TextChannel } from 'discord.js'
 import { fetchYoutubeVideoFromUrlOrQuery } from './helpers/youtubeHelpers/youtubeHelpers'
-import {
-  createQueueEmbed,
-  createYoutubeEmbed,
-  createYoutubeErrorEmbed,
-  NowPlayingEmbedState,
-} from './helpers/embeds'
-import { client } from '.'
-import { AUDIO_FILES, PATH } from './constants'
+import { createQueueEmbed, createYoutubeEmbed, NowPlayingEmbedState } from './helpers/embedHelpers'
+import { BOT_USER_ID, PATH } from './constants'
 import { Readable } from 'stream'
-import { createJsonForUser } from './helpers/seedMusicHistory'
 import { existsSync, readFileSync } from 'fs'
 import { FormattedYoutubeVideo } from './helpers/youtubeHelpers/youtubeFormatterHelpers'
+import { createOrUpdateUserMusicHistory } from './helpers/musicDataHelpers'
+import { shuffle } from './helpers/otherHelpers'
+import { getCurrentTimestamp } from './helpers/formatterHelpers'
 
 interface YoutubeMusicPlayerOptions {
   connection?: VoiceConnection
@@ -30,6 +26,7 @@ interface PlayOptions {
   query: string
   userId: string
   interaction?: ChatInputCommandInteraction
+  queueInPosition?: number
 }
 
 interface PlayAudioFromYoutubeOptions {
@@ -51,6 +48,7 @@ interface EnqueueOptions {
   userId: string
   interaction?: ChatInputCommandInteraction
   saveHistory?: boolean
+  queueInPosition?: number
 }
 
 interface NowPlayingEmbedInfo {
@@ -94,12 +92,12 @@ export class YoutubeMusicPlayer {
     this.previouslyPlayed = null
   }
 
-  private subscribeToMusicPlayer() {
-    if (!this.connection) throw new Error('Dog is not in a voice channel.')
-    if (
-      this.connection?.state.status === 'ready' &&
-      this.connection?.state.subscription?.player === this.player
-    ) {
+  private subscribeToMusicPlayer(interaction?: any) {
+    if (!this.connection) {
+      console.error('Dog is not in a voice channel.')
+      if (interaction) throw new Error('Dog is not in a voice channel.')
+    }
+    if (this.connection?.state.status === 'ready' && this.connection?.state.subscription?.player === this.player) {
       // console.log('##### Already subscribed to the music player')
       return
     } else {
@@ -115,54 +113,54 @@ export class YoutubeMusicPlayer {
   // overrwrite currently playing song
   // used when using voice commands or when force option is selected
   async forcePlay({ query, userId, interaction }: PlayOptions) {
-    this.subscribeToMusicPlayer()
-    const youtubeResult = (await fetchYoutubeVideoFromUrlOrQuery({
+    this.subscribeToMusicPlayer(interaction)
+    const video = (await fetchYoutubeVideoFromUrlOrQuery({
       urlOrQuery: query,
       useYts: true,
     })) as any
 
     await this.playAudioFromYTVideo({
-      video: youtubeResult,
+      video,
       userId,
       force: true,
       interaction,
     })
   }
 
-  async play({ query, userId, interaction }: PlayOptions) {
+  // this function is kind of useless I think since enqueue does the same thing more or less, TODO: remove
+  // primary play function is in playerFunctions.ts
+  async play({ query, userId, interaction, queueInPosition }: PlayOptions) {
     const videos = await fetchYoutubeVideoFromUrlOrQuery({
       urlOrQuery: query,
       useYts: this.player.state.status === AudioPlayerStatus.Idle,
     })
-    await this.enqueue({ videosToQueue: videos, userId, interaction })
+    await this.enqueue({ videosToQueue: videos, userId, interaction, queueInPosition })
   }
 
-  async enqueue({
-    videosToQueue,
-    userId,
-    saveHistory = false,
-    interaction,
-  }: EnqueueOptions) {
-    const videos = Array.isArray(videosToQueue)
-      ? videosToQueue
-      : [videosToQueue]
-    this._queue.push(
-      ...videos.map((video) => ({ video, userId, saveHistory }) as QueueItem)
-    )
+  async enqueue({ videosToQueue, userId, interaction, saveHistory = true, queueInPosition }: EnqueueOptions) {
+    const videos = Array.isArray(videosToQueue) ? videosToQueue : [videosToQueue]
+
+    const queueItems = videos.map((video) => ({ video, userId, saveHistory }) as QueueItem)
+
+    if (queueInPosition !== undefined && queueInPosition >= 0 && queueInPosition <= this._queue.length) {
+      this._queue.splice(queueInPosition, 0, ...queueItems)
+    } else {
+      this._queue.push(...queueItems)
+    }
 
     if (this.player.state.status === AudioPlayerStatus.Idle) {
       await this.playNextInQueue(interaction)
     } else {
       await this.sendOrUpdateQueueEmbed()
-      this.editNowPlayingEmbed()
+      await this.editNowPlayingEmbed()
 
-      if (interaction) interaction.deleteReply()
+      if (interaction && !interaction.replied) interaction.deleteReply()
     }
   }
 
   async playNextInQueue(interaction?: any) {
     const queueItem = this._queue.shift()
-    if (!queueItem) return console.error('!!! No items in queue')
+    if (!queueItem) return
 
     await this.playAudioFromYTVideo({
       video: queueItem.video,
@@ -179,15 +177,15 @@ export class YoutubeMusicPlayer {
     saveHistory = true,
     force = false,
   }: PlayAudioFromYoutubeOptions) {
-    this.subscribeToMusicPlayer()
+    this.subscribeToMusicPlayer(interaction)
 
     try {
       if (this.player.state.status === AudioPlayerStatus.Idle || force) {
         if (force) {
-          this.stop({ skip: true, skippedByUserId: userId })
+          await this.stop({ skip: true, skippedByUserId: userId })
         }
 
-        if (interaction) interaction.deleteReply()
+        if (interaction && !interaction.replied) interaction.deleteReply()
 
         // send loading embed
         this._textChannel
@@ -206,12 +204,16 @@ export class YoutubeMusicPlayer {
               ...this.nowPlayingEmbedInfo,
               ...{ message, video, userId, state: 'loading' },
             }
+            message.react('❤️')
+            message.react('🚫')
+            message.react('⏭️')
             this.sendOrUpdateQueueEmbed()
           })
         /* -------------------------------------------------------------- */
         this.audioStream = createYoutubeAudioStream(video.url)
         const audioResource = createAudioResource(this.audioStream, {
           inlineVolume: true,
+          silencePaddingFrames: 10,
         })
         audioResource.volume?.setVolume(0.5)
         this.player.play(audioResource)
@@ -220,23 +222,18 @@ export class YoutubeMusicPlayer {
         this.player.removeAllListeners()
         this.player
           .once(AudioPlayerStatus.Idle, async () => {
-            console.log(
-              '######################################### TRACK FINISHED #########################################'
-            )
-            if (saveHistory) this.updateMusicBotHistory(video, userId)
-            this.editNowPlayingEmbed('finished')
-            await this.playNextInQueue()
+            this.handleTrackFinished({ saveHistory })
           })
-          .once(AudioPlayerStatus.Playing, () => {
-            this.editNowPlayingEmbed('playing')
+          .once(AudioPlayerStatus.Playing, async () => {
+            await this.editNowPlayingEmbed('playing')
             this.previouslyPlayed = this.currentlyPlaying
             this.currentlyPlaying = { video, userId }
-            console.log(`🎹 Now playing: ${video.title}`)
+            console.log(`[${getCurrentTimestamp()}] 🎹 Now playing: ${video.title}`)
           })
           .on('error', async (err) => {
-            this.editNowPlayingEmbed('error', null, err)
+            await this.editNowPlayingEmbed('error', null, err)
 
-            this.stop()
+            await this.stop()
             // await client.playAudioFromFilePath({
             //   audioFilePath: AUDIO_FILES.WHIMPER,
             // })
@@ -248,13 +245,31 @@ export class YoutubeMusicPlayer {
     }
   }
 
+  async handleTrackFinished({ saveHistory = false }: { saveHistory?: boolean }) {
+    const { video, userId } = this.nowPlayingEmbedInfo
+    console.log(
+      `######################################### ${video.title} FINISHED #########################################`
+    )
+    if (saveHistory) this.updateMusicBotHistory(video, userId)
+    await this.editNowPlayingEmbed('finished')
+
+    if (userId === BOT_USER_ID) {
+      this.nowPlayingEmbedInfo.message?.delete()
+      console.log(
+        `######################################### HOURLY MUSIC - DELETING EMBED #########################################`
+      )
+    }
+
+    await this.playNextInQueue()
+  }
+
   async sendOrUpdateQueueEmbed() {
     const numItemsToDisplay = 8
     const queueItemText = this._queue
       .slice(0, numItemsToDisplay)
       .map(
         (item, index) =>
-          `‎ [${index + 1}] ‎ ${item.video.title} - (${item.video.duration}) <@${item.userId}>`
+          `‎ [${index + 1}] ‎ [${item.video.title}](${item.video.url}) - (${item.video.duration}) <@${item.userId}>`
       )
       .join('\n')
 
@@ -267,9 +282,7 @@ export class YoutubeMusicPlayer {
     const latestMessage = latestMessages.first()
 
     // Determine if we should replace the existing embed
-    const shouldRepost =
-      this.queueEmbedInfo.message &&
-      latestMessage?.id !== this.queueEmbedInfo.message.id
+    const shouldRepost = this.queueEmbedInfo.message && latestMessage?.id !== this.queueEmbedInfo.message.id
 
     // If no embed exists and queue has enough items, post new embed
     if (!this.queueEmbedInfo.message && this._queue.length >= 2) {
@@ -283,16 +296,12 @@ export class YoutubeMusicPlayer {
     }
     // If there's an embed and queue is too short, remove it
     else if (this.queueEmbedInfo.message && this._queue.length < 2) {
-      await this.queueEmbedInfo.message
-        .delete()
-        .catch((err: any) => console.error(err.message))
+      await this.queueEmbedInfo.message.delete().catch((err: any) => console.error(err.message))
       this.queueEmbedInfo.message = null
     }
     // If the embed is not the latest message, delete and repost it
     else if (shouldRepost) {
-      await this.queueEmbedInfo.message
-        ?.delete()
-        .catch((err: any) => console.error(err.message))
+      await this.queueEmbedInfo.message?.delete().catch((err: any) => console.error(err.message))
 
       await this._textChannel
         ?.send({
@@ -311,22 +320,34 @@ export class YoutubeMusicPlayer {
         .catch((err: any) => console.error(err.message))
     }
 
-    this.editNowPlayingEmbed()
+    await this.editNowPlayingEmbed()
   }
 
   async deleteQueueEmbed() {
-    await this.queueEmbedInfo.message
-      ?.delete()
-      .catch((err: any) => console.error(err.message))
+    await this.queueEmbedInfo.message?.delete().catch((err: any) => console.error(err.message))
     this.queueEmbedInfo.message = null
   }
 
-  clearQueue() {
-    this._queue = []
-    this.editNowPlayingEmbed()
+  async shuffle(userId: string) {
+    if (this.queue.length >= 2) {
+      this.queue = shuffle(this._queue)
+      // this._textChannel?.send({
+      //   allowedMentions: {
+      //     parse: [],
+      //   },
+      //   content: `<@${userId}> shuffled the queue!`,
+      // })
+      await this.sendOrUpdateQueueEmbed()
+      await this.editNowPlayingEmbed()
+    }
   }
 
-  skip(userId: string) {
+  async clearQueue() {
+    this._queue = []
+    await this.editNowPlayingEmbed()
+  }
+
+  async skip(userId: string) {
     try {
       this.subscribeToMusicPlayer()
       // this._textChannel?.send({
@@ -335,37 +356,33 @@ export class YoutubeMusicPlayer {
       //   },
       //   content: `<@${userId}> used skip!`,
       // })
-      this.stop({ skip: true, skippedByUserId: userId })
+      await this.stop({ skip: true, skippedByUserId: userId })
     } catch (err) {
       throw new Error("Player isn't playing anything!")
     }
   }
 
-  pause() {
+  async pause() {
     try {
-      this.editNowPlayingEmbed('paused')
+      await this.editNowPlayingEmbed('paused')
       this.player.pause()
     } catch {
       throw new Error("Player isn't playing anything!")
     }
   }
 
-  unpause() {
+  async unpause() {
     try {
       this.subscribeToMusicPlayer()
-      this.editNowPlayingEmbed('playing')
+      await this.editNowPlayingEmbed('playing')
       this.player.unpause()
     } catch {
       throw new Error("Player isn't playing anything!")
     }
   }
 
-  stop(
-    {
-      skip = false,
-      skippedByUserId,
-      error = null,
-    }: { skip?: boolean; skippedByUserId?: string; error?: any } = {
+  async stop(
+    { skip = false, skippedByUserId, error = null }: { skip?: boolean; skippedByUserId?: string; error?: any } = {
       skip: false,
       skippedByUserId: null,
       error: null,
@@ -375,7 +392,7 @@ export class YoutubeMusicPlayer {
     if (error) state = 'error'
     if (skip) state = 'skipped'
 
-    this.editNowPlayingEmbed(state, skippedByUserId, error)
+    await this.editNowPlayingEmbed(state, skippedByUserId, error)
     this.deleteQueueEmbed()
     this.player.stop()
     this.player.unpause()
@@ -399,11 +416,12 @@ export class YoutubeMusicPlayer {
     this.currentlyPlaying = null
   }
 
-  editNowPlayingEmbed(
+  async editNowPlayingEmbed(
     state: NowPlayingEmbedState = this.nowPlayingEmbedInfo.state,
     skippedByUserId?: string,
     error?: any
   ) {
+    if (this.nowPlayingEmbedInfo.state === 'finished') return
     if (this.nowPlayingEmbedInfo.state === 'skipped') return
     if (this.nowPlayingEmbedInfo.state === 'error') return
     if (!this.nowPlayingEmbedInfo.message) return
@@ -411,7 +429,15 @@ export class YoutubeMusicPlayer {
 
     // console.log(`###### Track embed state: ${state}`)
     this.nowPlayingEmbedInfo.state = state
-    this.nowPlayingEmbedInfo.message
+    if (
+      this.nowPlayingEmbedInfo.state === 'finished' ||
+      this.nowPlayingEmbedInfo.state === 'skipped' ||
+      this.nowPlayingEmbedInfo.state === 'error'
+    ) {
+      const reaction = this.nowPlayingEmbedInfo.message.reactions.cache.get('⏭️')
+      if (reaction) reaction.users.remove(BOT_USER_ID).catch(console.error)
+    }
+    await this.nowPlayingEmbedInfo.message
       ?.edit({
         embeds: [
           createYoutubeEmbed({
@@ -430,11 +456,9 @@ export class YoutubeMusicPlayer {
   }
 
   updateMusicBotHistory(video: FormattedYoutubeVideo, userId: string) {
-    const messageHistoryFilePath = `${PATH.MUSIC_BOT_HISTORY}/${userId}.json`
+    const messageHistoryFilePath = `${PATH.USER_DATA}/${userId}/music_queue_history.json`
     if (existsSync(messageHistoryFilePath)) {
-      const userMusicBotHistory = JSON.parse(
-        readFileSync(messageHistoryFilePath, 'utf-8')
-      )
+      const userMusicBotHistory = JSON.parse(readFileSync(messageHistoryFilePath, 'utf-8'))
       const videoId = this.currentlyPlaying.video.id
       if (!userMusicBotHistory[videoId]) {
         // If the video doesn't exist in the history, create a new entry
@@ -446,17 +470,15 @@ export class YoutubeMusicPlayer {
         // If the video exists, just increment the requestCount
         userMusicBotHistory[videoId].requestCount += 1
       }
-      createJsonForUser(userId, userMusicBotHistory)
+      createOrUpdateUserMusicHistory(userId, userMusicBotHistory)
     } else {
-      createJsonForUser(userId, {
+      createOrUpdateUserMusicHistory(userId, {
         [video.id]: {
           title: video.title,
           requestCount: 1,
         },
       })
     }
-
-    console.log('##### UPDATED USER MUSIC BOT HISTORY')
   }
 
   // ===========================================================================================

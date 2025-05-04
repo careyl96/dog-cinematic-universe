@@ -10,6 +10,7 @@ audio_files/generated/tts/*
 audio_files/generated/wav/*
 audio_files/generated/youtube/*
 chat_history/*
+user_data/*
 storage/
 
 cookies.json

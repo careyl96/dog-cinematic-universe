@@ -1,11 +1,11 @@
+import dotenv from 'dotenv'
+import https from 'https'
 import { InteractionContextType, SlashCommandBuilder } from 'discord.js'
 import { writeFileSync } from 'fs'
 import { PATH } from '../../constants'
 import axios, { AxiosRequestConfig } from 'axios'
-import dotenv from 'dotenv'
-import https from 'https'
 import { client } from '../..'
-import { createErrorEmbed } from '../../helpers/embeds'
+import { createErrorEmbed } from '../../helpers/embedHelpers'
 
 dotenv.config()
 
@@ -89,7 +89,7 @@ export const playTTSAudio = async (
     httpsAgent: new https.Agent({
       rejectUnauthorized: false, // Ignore SSL errors
     }),
-    timeout: 10000,
+    timeout: 60000,
   }
 
   const response = await axios.post(

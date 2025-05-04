@@ -1,11 +1,14 @@
-import { EmbedBuilder, GuildMember, MessageFlags } from 'discord.js'
+import fs from 'fs'
+import path from 'path'
+import { EmbedBuilder, GuildMember } from 'discord.js'
 import { client } from '..'
 import { fetchYoutubeVideoFromUrlOrQuery } from './youtubeHelpers/youtubeHelpers'
 import { AudioPlayerStatus } from '@discordjs/voice'
-import { TEXT_CHANNELS } from '../constants'
-import { fetchMessages, filterAndFormatMessages } from './seedMusicHistory'
-import { shuffle } from './formatterHelpers'
-import { FormattedYoutubeVideo } from './youtubeHelpers/youtubeFormatterHelpers'
+import { BOT_USER_ID, PATH, TEXT_CHANNELS } from '../constants'
+import { fetchMessages, getGuildMember } from './otherHelpers'
+import { shuffle } from './otherHelpers'
+import { extractYouTubeIdFromUrl, FormattedYoutubeVideo } from './youtubeHelpers/youtubeFormatterHelpers'
+import { getVideoDataFromMessage } from './embedHelpers'
 
 // play music using MusicPlayer
 export const play = async (options: {
@@ -14,20 +17,16 @@ export const play = async (options: {
   interaction?: any
   force?: boolean
   triggeredByBot?: boolean
+  queueInPosition?: number
 }) => {
-  const {
-    user,
-    query,
-    force = false,
-    interaction,
-    triggeredByBot = false,
-  } = options
+  const { user, query, force = false, interaction, triggeredByBot = false, queueInPosition } = options
   try {
     if (!query) return console.log('##### No query provided for play command.')
 
     // have bot join voice channel of user who called command
-    const currentVoiceChannelId = user?.voice.channelId
-    await client.joinVoiceChannel(currentVoiceChannelId, interaction)
+    const isVoiceConnectionEstablished = await client.ensureVoiceConnection(user, interaction)
+    if (!isVoiceConnectionEstablished) return
+
     if (force) {
       await client.musicPlayer?.forcePlay({
         query,
@@ -35,12 +34,8 @@ export const play = async (options: {
         interaction,
       })
     } else {
-      if (
-        triggeredByBot &&
-        client.musicPlayer?.player.state.status === 'playing'
-      )
-        return
-      await client.musicPlayer?.play({ query, userId: user.id, interaction })
+      if (triggeredByBot && client.musicPlayer?.player.state.status === 'playing') return
+      await client.musicPlayer?.play({ query, userId: user.id, interaction, queueInPosition })
     }
   } catch (err) {
     if (triggeredByBot) {
@@ -61,21 +56,12 @@ type QueueOptions = {
   interaction?: any
   saveHistory: boolean
 }
-export const queue = async ({
-  user,
-  query,
-  saveHistory = true,
-}: QueueOptions) => {
+export const queue = async ({ user, query, interaction, saveHistory = true }: QueueOptions) => {
   if (!query) return
 
   try {
-    /* -------------------------------------------------------------- */
-    // Have the bot join the voice channel of the user who called the command
-    const currentVoiceChannelId = user!.voice.channelId
-    if (client.voiceChannel?.id !== currentVoiceChannelId) {
-      await client.joinVoiceChannel(currentVoiceChannelId)
-    }
-    /* -------------------------------------------------------------- */
+    const isVoiceConnectionEstablished = await client.ensureVoiceConnection(user, interaction)
+    if (!isVoiceConnectionEstablished) return
 
     // Function to handle both single query (string) and multiple queries (currently only using function for passing array of youtube urls)
     const enqueueVideos = async (queries: string | string[]) => {
@@ -93,6 +79,7 @@ export const queue = async ({
       await client.musicPlayer!.enqueue({
         videosToQueue: videos,
         userId: user.id,
+        interaction,
         saveHistory,
       })
     }
@@ -102,17 +89,20 @@ export const queue = async ({
     throw err
   }
 }
-export const remove = async (
-  start: number,
-  end?: number,
-  interaction?: any
-) => {
-  if (start < 1 || start > client.musicPlayer.queue.length) return
 
-  const removedItems = client.musicPlayer.queue.splice(
-    start - 1,
-    end ? end - start + 1 : 1
-  )
+export const shuffleQueue = async (userId: string) => {
+  try {
+    await client.musicPlayer!.shuffle(userId)
+  } catch (err) {
+    throw err
+  }
+}
+export const remove = async (start: number, end?: number, interaction?: any) => {
+  if (start < 1 || start > client.musicPlayer.queue.length) {
+    return interaction && interaction.deleteReply()
+  }
+
+  const removedItems = client.musicPlayer.queue.splice(start - 1, end ? end - start + 1 : 1)
 
   client.musicPlayer.sendOrUpdateQueueEmbed()
 
@@ -122,55 +112,60 @@ export const remove = async (
       : `- ${removedItems[0].video.title}`
 
     await interaction.followUp({
-      embeds: [
-        new EmbedBuilder().setTitle('Removed items:').setDescription(reply),
-      ],
+      embeds: [new EmbedBuilder().setTitle('Removed items:').setDescription(reply)],
     })
   }
 }
-export const stop = () => {
+export const stop = async () => {
   try {
     if (client.player.state.status === AudioPlayerStatus.Playing) {
       client.player.stop()
     } else {
-      client.musicPlayer!.pause()
+      await client.musicPlayer!.pause()
     }
   } catch (err) {
     throw err
   }
 }
-export const unpause = () => {
+export const unpause = async () => {
   try {
     if (client.player.state.status === AudioPlayerStatus.Paused) {
       client.player.unpause()
     } else {
-      client.musicPlayer!.unpause()
+      await client.musicPlayer!.unpause()
     }
   } catch (err) {
     throw err
   }
 }
-export const skip = (userId: string) => {
+export const skip = async (userId: string) => {
   try {
     if (client.player.state.status === AudioPlayerStatus.Playing) {
       client.player.stop()
     } else {
-      client.musicPlayer!.skip(userId)
+      await client.musicPlayer!.skip(userId)
     }
   } catch (err) {
     throw err
   }
 }
-export const roulette = async (userId: string) => {
-  const guild = client.guilds.cache.get(process.env.DISCORD_GUILD_ID)
-  const user = await guild.members.fetch(userId)
-
+export const roulette = async (userId: string, count: number = 1) => {
+  const user = await getGuildMember(userId)
   const musicBotChannel = client.channels.cache.get(TEXT_CHANNELS.MUSIC_BOT)
-  const messages = await fetchMessages(musicBotChannel, 300)
-  let youtubeUrls = filterAndFormatMessages(messages).map(
-    (videoInfo) => videoInfo.url
-  )
-  youtubeUrls = shuffle([...new Set(youtubeUrls)])[0]
+  const messages = await fetchMessages(musicBotChannel, 1000)
+
+  const rawBlacklist = fs.readFileSync(path.join(PATH.USER_DATA, `${BOT_USER_ID}/blacklisted_music.json`), 'utf-8')
+  const blacklist = JSON.parse(rawBlacklist)
+
+  let youtubeUrls = messages
+    .map((message) => getVideoDataFromMessage(message)?.url)
+    .filter((message) => !!message)
+    .filter((videoUrl) => {
+      const videoId = extractYouTubeIdFromUrl(videoUrl)
+      return !!videoId && !blacklist.includes(videoId)
+    })
+  youtubeUrls = shuffle([...new Set(youtubeUrls)]).slice(0, Math.min(count, 50))
+
   await queue({
     user,
     query: youtubeUrls,

@@ -5,7 +5,7 @@ import prism from 'prism-media'
 import { createWriteStream } from 'fs'
 import { ClientWithCommands } from '../../ClientWithCommands'
 import path from 'node:path'
-import { PATH } from '../../constants'
+import { PATH, TRIGGER_WORDS } from '../../constants'
 import ffmpegPath from 'ffmpeg-static'
 import ffmpeg from 'fluent-ffmpeg'
 import { createReadStream, unlink } from 'node:fs'
@@ -18,24 +18,11 @@ import { client } from '../..'
 dotenv.config()
 ffmpeg.setFfmpegPath(ffmpegPath!)
 
-export const parseCommandWordAndQuery = (
-  words: string[],
-  commands: string[]
-): [string, string] => {
+export const parseCommandWordAndQuery = (words: string[], commands: string[]): [string, string] => {
   let commandWord = ''
   let query = ''
 
-  const firstTriggerWords = [
-    'dog',
-    'dawg',
-    'dogs',
-    'e-dog',
-    'yogg',
-    'bot',
-    'bought',
-  ]
-
-  const startsWithTrigger = firstTriggerWords.includes(words[0]!)
+  const startsWithTrigger = TRIGGER_WORDS.includes(words[0]!)
 
   if (startsWithTrigger) {
     if (commands.includes(words[1]!)) {
@@ -57,10 +44,7 @@ export const parseCommandWordAndQuery = (
 }
 
 // transcodes discord voice input to text and checks for voice commands
-export const transcodeUserVoiceInput = async (
-  client: ClientWithCommands,
-  user: GuildMember
-) => {
+export const transcodeUserVoiceInput = async (client: ClientWithCommands, user: GuildMember) => {
   // prevent creation of unnecessary extra streams
   if (client.activeSpeakers.has(user.id)) return
   client.activeSpeakers.add(user.id)
@@ -69,21 +53,15 @@ export const transcodeUserVoiceInput = async (
     const userIdAndName = `${user.id}_${user.displayName}`
     const userIdAndNameWithDatePcm = `${Date.now()}_${userIdAndName}`
 
-    const pcmOutputPath = path.join(
-      PATH.AUDIO_FILES.GENERATED.PCM,
-      `${userIdAndNameWithDatePcm}.pcm`
-    )
-    const wavOutputPath = path.join(
-      PATH.AUDIO_FILES.GENERATED.WAV,
-      `${userIdAndNameWithDatePcm}.wav`
-    )
+    const pcmOutputPath = path.join(PATH.AUDIO_FILES.GENERATED.PCM, `${userIdAndNameWithDatePcm}.pcm`)
+    const wavOutputPath = path.join(PATH.AUDIO_FILES.GENERATED.WAV, `${userIdAndNameWithDatePcm}.wav`)
 
     // https://discord.js.org/docs/packages/voice/main/VoiceReceiver:Class#subscribe
     // receiver.subscribe returns raw discord audio output as readable stream of Opus packets
     const readStream = client.connection!.receiver.subscribe(user.id, {
       end: {
         behavior: EndBehaviorType.AfterSilence,
-        duration: 1000,
+        duration: 1.5 * 1000,
       },
     })
     readStream
@@ -95,12 +73,7 @@ export const transcodeUserVoiceInput = async (
       })
 
     // create write stream for pcm output file
-    const writeStream = createWriteStream(
-      path.join(
-        PATH.AUDIO_FILES.GENERATED.PCM,
-        `${userIdAndNameWithDatePcm}.pcm`
-      )
-    )
+    const writeStream = createWriteStream(path.join(PATH.AUDIO_FILES.GENERATED.PCM, `${userIdAndNameWithDatePcm}.pcm`))
     writeStream.on('error', (err) => {
       console.error(err)
     })
@@ -112,7 +85,7 @@ export const transcodeUserVoiceInput = async (
       channels: 1,
     })
 
-      // transcode raw discord input to pcm file
+    // transcode raw discord input to pcm file
     await pipeline(readStream, opusDecoder, writeStream)
 
     // transcode pcm file to wav file
@@ -157,9 +130,7 @@ export const transcodePcmToWav = async (
   })
 }
 
-export const transcribeAudioWithWhisper = async (
-  audioFilePath: string
-): Promise<string> => {
+export const transcribeAudioWithWhisper = async (audioFilePath: string): Promise<string> => {
   // Perform a POST request using axios
   let responseText
   try {
@@ -168,9 +139,7 @@ export const transcribeAudioWithWhisper = async (
 
     formData.append('model', 'Systran/faster-distil-whisper-large-v3')
     // formData.append('model', 'Systran/faster-whisper-tiny')
-    formData.append('language', 'en')
     formData.append('response_format', 'text')
-    formData.append('temperature', '0')
     formData.append('vad_filter', 'true')
     formData.append('file', audioFileStream)
 
@@ -211,19 +180,16 @@ export const fetchModels = async () => {
 
   const config = {
     httpsAgent: agent,
-    timeout: 2000,
+    timeout: 5 * 1000,
   }
 
   try {
-    const models = await axios.get(
-      `${process.env.WHISPER_API}/v1/models`,
-      config
-    )
-    console.log(
-      models.data.data
-        .filter((model: any) => model.id.includes('whisper-large-v3-turbo'))
-        .map((model: any) => model.id)
-    )
+    const models = await axios.get(`${process.env.WHISPER_API}/v1/models`, config)
+
+    const modelList = models.data.data
+      .filter((model: any) => model.id.includes('whisper-large-v3-turbo'))
+      .map((model: any) => model.id)
+    console.log('✅ === Whisper server connection successfully established === ✅')
     client.setVoiceCommands(true)
     return models.data.data
   } catch (err: any) {
@@ -231,3 +197,5 @@ export const fetchModels = async () => {
     client.setVoiceCommands(false)
   }
 }
+
+export const handleSingleWordCommands = (user: any, query: string) => {}

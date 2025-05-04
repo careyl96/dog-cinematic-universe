@@ -13,7 +13,7 @@ export const clearAudioFolders = async () => {
     await Promise.all(
       folders.map(async (folder) => {
         await fs.emptyDir(folder)
-        console.log(`${folder} cleared successfully`)
+        // console.log(`${folder} cleared successfully`)
       })
     )
   } catch (err) {
