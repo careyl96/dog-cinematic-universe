@@ -1,0 +1,18 @@
+services:
+  dog-cinematic-universe:
+    container_name: dog-cinematic-universe-bot
+    build:
+      dockerfile: Dockerfile
+      context: .
+    restart: unless-stopped
+    environment:
+      - DISCORD_TOKEN=${DISCORD_TOKEN}
+      - DISCORD_CLIENT_ID=${DISCORD_CLIENT_ID}
+      - DISCORD_GUILD_ID=${DISCORD_GUILD_ID}
+      - WHISPER_API=${WHISPER_API}
+      - GROQ_API_KEY=${GROQ_API_KEY}
+      - YOUTUBE_API_KEY=${YOUTUBE_API_KEY}
+    volumes:
+      - ./audio_files:/app/audio_files
+      - ./src:/app/src
+      - ./.env:/app/.env # Mount .env file
