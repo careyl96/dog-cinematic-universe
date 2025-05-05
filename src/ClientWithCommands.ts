@@ -407,7 +407,7 @@ export class ClientWithCommands extends Client {
     const stopCommand = async () => await stop()
     const unpauseCommand = async () => await unpause()
     const skipCommand = async () => await skip(user.id)
-    const rouletteCommand = async () => await roulette(user.id, parseInt(groqIntent?.count, 10) || 1)
+    const rouletteCommand = async () => await roulette({ userId: user.id, count: parseInt(groqIntent?.count, 10) || 1 })
 
     createAliasGroup(COMMANDS.PLAY, playCommand)
     createAliasGroup(COMMANDS.QUEUE, queueCommand)

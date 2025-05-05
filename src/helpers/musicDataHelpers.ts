@@ -100,3 +100,24 @@ export const createOrUpdateSongBlacklist = (data: string | string[], remove: boo
 
   fs.writeFileSync(filePath, JSON.stringify(updatedData, null, 2), 'utf-8')
 }
+
+export const updateHistoryFile = (filePath: string, video: FormattedYoutubeVideo) => {
+  let history: Record<string, any> = {}
+
+  if (fs.existsSync(filePath)) {
+    history = JSON.parse(fs.readFileSync(filePath, 'utf-8'))
+  }
+
+  const videoId = video.id
+  if (!history[videoId]) {
+    history[videoId] = {
+      title: video.title,
+      requestCount: 1,
+    }
+  } else {
+    history[videoId].requestCount += 1
+  }
+
+  const userId = filePath.split('/').slice(-2, -1)[0] // Extract user ID from path
+  createOrUpdateUserMusicHistory(userId, history)
+}

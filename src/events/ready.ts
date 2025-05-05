@@ -6,7 +6,9 @@ import cron from 'node-cron'
 import { playHourlyMusic } from '../helpers/hourlyMusicHelpers'
 import { client } from '..'
 import { fetchMessages } from '../helpers/otherHelpers'
-import { TEXT_CHANNELS } from '../constants'
+import { BOT_USER_ID, TEXT_CHANNELS } from '../constants'
+import { getVideoDataFromMessage } from '../helpers/embedHelpers'
+import { createOrUpdateUserMusicHistory, createOrUpdateUsersLikedMusic } from '../helpers/musicDataHelpers'
 
 export default {
   name: Events.ClientReady,
@@ -21,12 +23,8 @@ export default {
       `)
     await fetchModels()
     await client.migrateToMostPopulatedVoiceChannelOrDisconnect()
+
     cron.schedule('0 0 * * * *', playHourlyMusic)
-    // const user = await getGuildMember(client, process.env.DISCORD_GUILD_ID!, 118585025905164291)
-    // client.runSpokenCommand(user, 'can you elaborate on that?')
-    // await perplexicaWebSearchAgent(`I'm making a discord bot that streams audio from a youtube stream using youtube-dl-exec, is there any way I can choose the timestamp at which the stream should start`)
-    // await analyzeIntent('roulette 500')
-    // checkMemoryUsage()
     console.log('\n* ════════════════════════════════════════════════════════════════ *\n')
   },
 }
@@ -59,6 +57,38 @@ async function cleanChannelMessages(): Promise<void> {
       }
     }
   }
+
+  console.log('Channel cleanup complete.')
+}
+
+// removes all embeds from the music bot channel that were sent by the bot itself
+async function populateMusicHistory(): Promise<void> {
+  const musicBotChannel = client.channels.cache.get(TEXT_CHANNELS.MUSIC_BOT)
+  const messages = await fetchMessages(musicBotChannel, 5000)
+
+  const musicHistory: any = {}
+  for (const message of messages) {
+    if (message.embeds.length > 0) {
+      try {
+        const videoData = getVideoDataFromMessage(message)
+        if (videoData) {
+          const videoId = videoData.id
+          if (!musicHistory[videoId]) {
+            musicHistory[videoId] = {
+              ...videoData,
+              requestCount: 1,
+            }
+          } else {
+            musicHistory[videoId].requestCount += 1
+          }
+        }
+      } catch (error) {
+        console.warn(`Failed to add message ID ${message.id}:`, error)
+      }
+    }
+  }
+
+  createOrUpdateUserMusicHistory(BOT_USER_ID, musicHistory)
 
   console.log('Channel cleanup complete.')
 }

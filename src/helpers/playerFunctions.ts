@@ -7,8 +7,14 @@ import { AudioPlayerStatus } from '@discordjs/voice'
 import { BOT_USER_ID, PATH, TEXT_CHANNELS } from '../constants'
 import { fetchMessages, getGuildMember } from './otherHelpers'
 import { shuffle } from './otherHelpers'
-import { extractYouTubeIdFromUrl, FormattedYoutubeVideo } from './youtubeHelpers/youtubeFormatterHelpers'
+import {
+  createYoutubeUrlFromId,
+  extractYouTubeIdFromUrl,
+  FormattedYoutubeVideo,
+} from './youtubeHelpers/youtubeFormatterHelpers'
 import { getVideoDataFromMessage } from './embedHelpers'
+import { getUserMusicHistory } from './musicDataHelpers'
+import { getRandomKeys } from '../commands/utility/roulette'
 
 // play music using MusicPlayer
 export const play = async (options: {
@@ -34,6 +40,7 @@ export const play = async (options: {
         interaction,
       })
     } else {
+      // triggered by bot occurs when hourly music is played
       if (triggeredByBot && client.musicPlayer?.player.state.status === 'playing') return
       await client.musicPlayer?.play({ query, userId: user.id, interaction, queueInPosition })
     }
@@ -149,21 +156,24 @@ export const skip = async (userId: string) => {
     throw err
   }
 }
-export const roulette = async (userId: string, count: number = 1) => {
+export const roulette = async ({
+  userId,
+  userIdFilter,
+  count = 1,
+}: {
+  userId: string
+  userIdFilter?: string
+  count: number
+}) => {
   const user = await getGuildMember(userId)
-  const musicBotChannel = client.channels.cache.get(TEXT_CHANNELS.MUSIC_BOT)
-  const messages = await fetchMessages(musicBotChannel, 1000)
-
   const rawBlacklist = fs.readFileSync(path.join(PATH.USER_DATA, `${BOT_USER_ID}/blacklisted_music.json`), 'utf-8')
   const blacklist = JSON.parse(rawBlacklist)
 
-  let youtubeUrls = messages
-    .map((message) => getVideoDataFromMessage(message)?.url)
-    .filter((message) => !!message)
-    .filter((videoUrl) => {
-      const videoId = extractYouTubeIdFromUrl(videoUrl)
-      return !!videoId && !blacklist.includes(videoId)
-    })
+  const userMusicHistory = getUserMusicHistory(userIdFilter || BOT_USER_ID)
+  let youtubeUrls = getRandomKeys(userMusicHistory, count)
+    .filter((videoId) => !blacklist.includes(videoId))
+    .map((videoId) => userMusicHistory[videoId].url || createYoutubeUrlFromId(videoId))
+
   youtubeUrls = shuffle([...new Set(youtubeUrls)]).slice(0, Math.min(count, 50))
 
   await queue({

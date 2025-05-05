@@ -13,7 +13,7 @@ import { BOT_USER_ID, PATH } from './constants'
 import { Readable } from 'stream'
 import { existsSync, readFileSync } from 'fs'
 import { FormattedYoutubeVideo } from './helpers/youtubeHelpers/youtubeFormatterHelpers'
-import { createOrUpdateUserMusicHistory } from './helpers/musicDataHelpers'
+import { createOrUpdateUserMusicHistory, updateHistoryFile } from './helpers/musicDataHelpers'
 import { shuffle } from './helpers/otherHelpers'
 import { getCurrentTimestamp } from './helpers/formatterHelpers'
 
@@ -127,14 +127,14 @@ export class YoutubeMusicPlayer {
     })
   }
 
-  // this function is kind of useless I think since enqueue does the same thing more or less, TODO: remove
+  // this function is kind of useless since enqueue does the same thing more or less, TODO: remove
   // primary play function is in playerFunctions.ts
   async play({ query, userId, interaction, queueInPosition }: PlayOptions) {
-    const videos = await fetchYoutubeVideoFromUrlOrQuery({
+    const video = await fetchYoutubeVideoFromUrlOrQuery({
       urlOrQuery: query,
       useYts: this.player.state.status === AudioPlayerStatus.Idle,
     })
-    await this.enqueue({ videosToQueue: videos, userId, interaction, queueInPosition })
+    await this.enqueue({ videosToQueue: video, userId, interaction, queueInPosition })
   }
 
   async enqueue({ videosToQueue, userId, interaction, saveHistory = true, queueInPosition }: EnqueueOptions) {
@@ -250,9 +250,10 @@ export class YoutubeMusicPlayer {
     console.log(
       `######################################### ${video.title} FINISHED #########################################`
     )
-    if (saveHistory) this.updateMusicBotHistory(video, userId)
+    if (saveHistory) this.updateMusicHistory(video, userId)
     await this.editNowPlayingEmbed('finished')
 
+    // Remove embed if the bot is the one who played the song (hourly music ready.ts)
     if (userId === BOT_USER_ID) {
       this.nowPlayingEmbedInfo.message?.delete()
       console.log(
@@ -455,30 +456,12 @@ export class YoutubeMusicPlayer {
       })
   }
 
-  updateMusicBotHistory(video: FormattedYoutubeVideo, userId: string) {
-    const messageHistoryFilePath = `${PATH.USER_DATA}/${userId}/music_queue_history.json`
-    if (existsSync(messageHistoryFilePath)) {
-      const userMusicBotHistory = JSON.parse(readFileSync(messageHistoryFilePath, 'utf-8'))
-      const videoId = this.currentlyPlaying.video.id
-      if (!userMusicBotHistory[videoId]) {
-        // If the video doesn't exist in the history, create a new entry
-        userMusicBotHistory[videoId] = {
-          title: video.title,
-          requestCount: 1,
-        }
-      } else {
-        // If the video exists, just increment the requestCount
-        userMusicBotHistory[videoId].requestCount += 1
-      }
-      createOrUpdateUserMusicHistory(userId, userMusicBotHistory)
-    } else {
-      createOrUpdateUserMusicHistory(userId, {
-        [video.id]: {
-          title: video.title,
-          requestCount: 1,
-        },
-      })
-    }
+  updateMusicHistory(video: FormattedYoutubeVideo, userId: string) {
+    const userPath = `${PATH.USER_DATA}/${userId}/music_queue_history.json`
+    const globalPath = `${PATH.USER_DATA}/${BOT_USER_ID}/music_queue_history.json`
+
+    updateHistoryFile(userPath, video)
+    updateHistoryFile(globalPath, video)
   }
 
   // ===========================================================================================

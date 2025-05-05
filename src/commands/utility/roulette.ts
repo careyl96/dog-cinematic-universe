@@ -42,25 +42,11 @@ export default {
       content: `<@${interaction.user.id}> used </roulette:1356769593208606791> ${count}!`.trim(),
     })
 
-    if (userIdFilter) {
-      const userMusicHistory = getUserMusicHistory(userIdFilter)
-      if (userMusicHistory) {
-        const youtubeUrls = getRandomKeys(userMusicHistory, count).map((videoId) => createYoutubeUrlFromId(videoId))
-
-        await queue({
-          user,
-          query: youtubeUrls,
-          saveHistory: false,
-          interaction,
-        })
-      }
-    } else {
-      await roulette(user.id, count)
-    }
+    await roulette({ userId: user.id, userIdFilter, count })
   },
 }
 
-const getRandomKeys = (obj: Record<string, any>, n: number): string[] => {
+export const getRandomKeys = (obj: Record<string, any>, n: number): string[] => {
   // Get all keys of the object
   const keys = Object.keys(obj)
 

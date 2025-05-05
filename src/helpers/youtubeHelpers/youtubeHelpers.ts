@@ -12,6 +12,8 @@ import {
   isValidYoutubeUrl,
 } from './youtubeFormatterHelpers'
 import { PassThrough } from 'stream'
+import { client } from '../..'
+import { createYoutubeEmbed } from '../embedHelpers'
 
 // fetches single youtube video via youtube api and returns formatted video for music player using videoId
 const fetchYoutubeVideoById = async (videoId: string) => {
@@ -70,12 +72,13 @@ const fetchYoutubeVideoByQuery = async (urlOrQuery: string) => {
 // https://developers.google.com/youtube/v3/getting-started#quota
 // https://developers.google.com/youtube/v3/docs/errors
 // fetches a single youtube video based on url or query
-export const fetchYoutubeVideoFromUrlOrQuery = async (options: {
+export const fetchYoutubeVideoFromUrlOrQuery = async ({
+  urlOrQuery,
+  useYts = false,
+}: {
   urlOrQuery: string
   useYts?: boolean
 }): Promise<FormattedYoutubeVideo | FormattedYoutubeVideo[]> => {
-  const { urlOrQuery, useYts = false } = options
-
   const isUrl = isValidYoutubeUrl(urlOrQuery)
   let playlistId: string | null = null
   let videoId: string | null = null
@@ -84,45 +87,33 @@ export const fetchYoutubeVideoFromUrlOrQuery = async (options: {
     try {
       const url = new URL(urlOrQuery)
       playlistId = url.searchParams.get('list')
-      const vParam = url.searchParams.get('v')
-
-      if (!playlistId && vParam) {
-        videoId = extractYouTubeIdFromUrl(urlOrQuery) as string
-      }
+      videoId = url.searchParams.get('v') || extractYouTubeIdFromUrl(urlOrQuery)
     } catch (err) {
       console.warn('Failed to parse YouTube URL:', err)
     }
   }
 
-  const useYtsFallback = async () => {
+  const fallback = async () => {
     console.log('##### Using yt-search fallback')
-    if (playlistId) {
-      console.log('###### Detected playlist URL')
-      return fetchPlaylistViaYts(urlOrQuery)
-    }
-    return fetchViaYTS(urlOrQuery, isUrl, videoId)
+    return playlistId ? fetchPlaylistViaYts(urlOrQuery) : fetchViaYTS(urlOrQuery, isUrl, videoId)
   }
 
   try {
-    if (useYts) {
-      return await useYtsFallback()
-    }
+    if (useYts) return await fallback()
 
-    if (playlistId) {
-      return await fetchYoutubePlaylistById(playlistId)
-    }
+    if (playlistId) return await fetchYoutubePlaylistById(playlistId)
+    if (isUrl && videoId) return await fetchYoutubeVideoById(videoId)
 
-    return isUrl ? await fetchYoutubeVideoById(videoId!) : await fetchYoutubeVideoByQuery(urlOrQuery)
-  } catch (err: any) {
-    console.warn('YouTube API failed, falling back to yt-search')
-    console.warn('Query:', urlOrQuery)
-    if (videoId) console.warn('Extracted videoId:', videoId)
+    return await fetchYoutubeVideoByQuery(urlOrQuery)
+  } catch (err) {
+    console.warn('Primary fetch failed. Query:', urlOrQuery, 'VideoId:', videoId)
+    console.error(err)
 
     try {
-      return await useYtsFallback()
-    } catch (fallbackErr: any) {
+      return await fallback()
+    } catch (fallbackErr) {
       console.error('Both YouTube API and yt-search failed:', fallbackErr)
-      throw new Error('Video unavailable')
+      throw new Error(`Video unavailable: ${urlOrQuery}`)
     }
   }
 }

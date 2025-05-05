@@ -106,7 +106,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
     let errorMessage = `${error?.message}` || 'Something went very wrong oopsie woopsie woof report to Carey'
 
     if (interaction.replied || interaction.deferred) {
-      console.log(error)
+      console.log('index.ts error:', error)
       await interaction.followUp(
         createErrorEmbed({
           errorMessage: errorMessage,
@@ -114,7 +114,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
         }) as any
       )
     } else {
-      console.log(error)
+      console.log('index.ts replied error:', error)
       await interaction.reply(
         createErrorEmbed({
           errorMessage: errorMessage,
