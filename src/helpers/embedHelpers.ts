@@ -4,9 +4,26 @@ import {
   FormattedYoutubeVideo,
   parseTitleWithDurationToIso,
 } from './youtubeHelpers/youtubeFormatterHelpers'
-import { stripTimeFromTitle } from './formatterHelpers'
+import {
+  escapeDiscordMarkdown,
+  generateProgressBar,
+  isoToTimestamp,
+  msToTimestamp,
+  stripBackticks,
+  stripTimeFromTitle,
+  timestampToISO,
+} from './formatterHelpers'
+import { client } from '..'
+import { CurrentlyPlaying } from '../MusicPlayer'
 
-export type NowPlayingEmbedState = 'loading' | 'playing' | 'paused' | 'finished' | 'skipped' | 'error'
+export enum NowPlayingEmbedState {
+  Loading = 'loading',
+  Playing = 'playing',
+  Paused = 'paused',
+  Finished = 'finished',
+  Skipped = 'skipped',
+  Error = 'error',
+}
 
 export const createErrorEmbed = (options: {
   errorMessage: string
@@ -27,40 +44,52 @@ export const createErrorEmbed = (options: {
   return response
 }
 
-export const createYoutubeEmbed = (options: {
-  youtubeVideo: any
+type CreateYoutubeEmbedOptions = {
+  video: FormattedYoutubeVideo
   userId: string
   upNext?: any
   state?: NowPlayingEmbedState
   skippedByUserId?: string
+  roulette?: boolean
   error?: any
-}) => {
-  const { youtubeVideo, userId, upNext, state, skippedByUserId, error } = options
-
+  percentage?: number
+}
+export const createYoutubeEmbed = ({
+  video,
+  userId,
+  // upNext,
+  state,
+  skippedByUserId,
+  roulette,
+  error,
+}: CreateYoutubeEmbedOptions) => {
   let stateString = ''
-  let color = 0xa0c980
+  const percentage = client.musicPlayer.currentlyPlaying?.newElapsedPercentage ?? 0
+  const progressBar = generateProgressBar(percentage, 10)
+  let color
+
   switch (state) {
-    case 'loading':
+    case NowPlayingEmbedState.Loading:
       stateString = `Loading...`
       color = 0x8c8c8c
       break
-    case 'playing':
-      stateString = `Now playing:`  
+    case NowPlayingEmbedState.Playing:
+      stateString = `Now playing:`
       color = 0xa0c980
       break
-    case 'paused':
+    case NowPlayingEmbedState.Paused:
       stateString = `Paused`
       color = 0x8c8c8c
       break
-    case 'finished':
+    case NowPlayingEmbedState.Finished:
       stateString = `Track finished`
       color = 0x0055cc
       break
-    case 'skipped':
+    case NowPlayingEmbedState.Skipped:
       stateString = `Track skipped`
       color = 0xe098e0
       break
-    case 'error':
+    case NowPlayingEmbedState.Error:
       stateString = `Error: ${error?.message.slice(0, 240)}`
       color = 0xec7278
       break
@@ -70,28 +99,61 @@ export const createYoutubeEmbed = (options: {
       break
   }
 
-  let description = `Requested by: <@${userId}>`
-  description = skippedByUserId ? description + `\nSkipped by: <@${skippedByUserId}>` : description
+  const currentlyPlaying = client.musicPlayer.currentlyPlaying
+  let requestedByValue = `<@${userId}>${roulette ? ' via </roulette:1356769593208606791>' : ''}`
+  let progressValue = ''
+  if (state !== NowPlayingEmbedState.Finished) {
+    // progressValue = `${state === NowPlayingEmbedState.Playing ? `<a:dogcited:782004922408894505> ` : ''}\`${msToTimestamp(currentlyPlaying.elapsedTime)}\` ${progressBar} \`${isoToTimestamp(video.duration)}\``
+    progressValue = `\`${msToTimestamp(currentlyPlaying.elapsedTime)}\` ${progressBar} \`${isoToTimestamp(video.duration)}\``
+  }
+
+  const fields = [
+    {
+      name: '<:dentge:1194024284360814682> Requested by',
+      value: requestedByValue,
+      inline: true,
+    },
+    {
+      name: '🕗 Duration',
+      value: video.duration ? `\`${isoToTimestamp(video.duration)}\`` : '(Unknown)',
+      inline: true,
+    },
+  ]
+
+  if (skippedByUserId) {
+    fields.push({
+      name: '<:Flowuwu:823463092724826162> Skipped by',
+      value: `<@${skippedByUserId}>`,
+      inline: true,
+    })
+  }
 
   const embed = new EmbedBuilder()
     .setColor(color)
-    .setTitle(`${youtubeVideo.title}${youtubeVideo.duration ? ` - (${youtubeVideo.duration})` : ''}`)
-    .setURL(youtubeVideo.url)
-    .setDescription(description)
+    .setTitle(`${formatYoutubeVideoTitleForEmbed(video)} ${state === NowPlayingEmbedState.Playing ? `<a:dogcited:782004922408894505> ` : ''}`)
+    .setURL(video.url)
     .setAuthor({
       name: stateString,
     })
-    .setThumbnail(youtubeVideo.thumbnail)
+    .addFields(...fields)
+    .setThumbnail(video.thumbnail)
     .setTimestamp()
 
-  if (upNext && (state === 'playing' || state === 'paused')) {
-    embed.addFields({
-      name: 'Up next:',
-      value: !!upNext
-        ? `${upNext.video.title}${youtubeVideo.duration ? ` - (${youtubeVideo.duration})` : ''} <@${upNext.userId}>`
-        : '*Queue is empty!*',
-    })
-  }
+  progressValue && embed.setDescription(progressValue)
+
+  // if (
+  //   upNext &&
+  //   (state === NowPlayingEmbedState.Loading ||
+  //     state === NowPlayingEmbedState.Playing ||
+  //     state === NowPlayingEmbedState.Paused)
+  // ) {
+  //   embed.addFields({
+  //     name: 'Up next:',
+  //     value: !!upNext
+  //       ? `[​\`${formatYoutubeVideoTitleForEmbed(upNext.video)}\`](<${upNext.video.url}>) <@${upNext.userId}>`
+  //       : '*Queue is empty!*',
+  //   })
+  // }
 
   return embed
 }
@@ -100,7 +162,7 @@ export const createYoutubeErrorEmbed = (options: { youtubeVideo: any; userId: st
   const { youtubeVideo, userId, err } = options
   return new EmbedBuilder()
     .setColor(0xec7278)
-    .setTitle(`${youtubeVideo.title} - (${youtubeVideo.duration})`)
+    .setTitle(`${escapeDiscordMarkdown(youtubeVideo.title)} - (${isoToTimestamp(youtubeVideo.duration)})`)
     .setURL(youtubeVideo.url)
     .setDescription(`Requested by: <@${userId}>`)
     .setAuthor({
@@ -132,22 +194,34 @@ export const createRawEmbed = (message: string) => {
 
 export const createLikedEmbed = (options: { text: string }) => {
   const { text } = options
-  return new EmbedBuilder().setColor(0xffa200).setDescription(`### Liked songs: \n${text}`)
+  return new EmbedBuilder().setColor(0xff7f9f).setDescription(`### Liked songs: \n${text}`)
 }
 
 export const getVideoDataFromMessage = (message: any): FormattedYoutubeVideo => {
-  const isMusicEmbed = message.embeds.length === 1 && message.embeds[0].data?.description?.includes('Requested by: ')
+  const embedData = message.embeds[0]?.data
+  const isMusicEmbed =
+    (message.embeds?.length === 1 && embedData?.fields?.[0]?.name.includes('Requested by')) ||
+    (message.embeds.length === 1 && embedData?.description?.includes('Requested by: '))
 
   if (!isMusicEmbed) return
 
-  const embedData = message.embeds[0].data
+  const isoDuration =
+    timestampToISO(stripBackticks(embedData.fields[1].value)) || parseTitleWithDurationToIso(embedData.title)
+
   const videoData: FormattedYoutubeVideo = {
     title: stripTimeFromTitle(embedData.title),
     url: embedData.url,
     id: extractYouTubeIdFromUrl(embedData.url),
-    duration: parseTitleWithDurationToIso(embedData.title),
+    duration: isoDuration,
     thumbnail: embedData.thumbnail.url,
   }
-
   return videoData
+}
+
+const formatYoutubeVideoTitleForEmbed = (video: FormattedYoutubeVideo): string => {
+  if (video.liveBroadcastContent === 'live') {
+    return `🔴 LIVE 🔴 - ${escapeDiscordMarkdown(video.title)}`
+  }
+
+  return `${escapeDiscordMarkdown(video.title)}`
 }

@@ -11,7 +11,7 @@ export default {
     try {
       await client.musicPlayer?.clearQueue()
 
-      const queueEmbed = new EmbedBuilder().setColor(0xffa200).setDescription('Queue has been cleared')
+      const queueEmbed = new EmbedBuilder().setDescription('Queue has been cleared')
       await interaction.reply({ embeds: [queueEmbed] })
     } catch (err) {
       console.error(err)

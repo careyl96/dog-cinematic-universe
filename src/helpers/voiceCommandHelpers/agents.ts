@@ -1,13 +1,14 @@
 import axios from 'axios'
 import https from 'https'
 import dotenv from 'dotenv'
-import { ChatMessage, getMessageHistory, client as groqClient, saveConversation } from '../../groq/groq'
+import { getMessageHistory, client as groqClient, saveConversation } from '../../groq/groq'
 import { playTTSAudio } from '../../commands/utility/tts'
 import { chunkifyText, cleanMarkdown, getCharacterCount, sanitizeInputText } from '../formatterHelpers'
 import { BOT_USER_ID, TEXT_CHANNELS } from '../../constants'
 import { client } from '../..'
 import { TextChannel } from 'discord.js'
 import { createGroqEmbed, createRawEmbed } from '../embedHelpers'
+import { ChatCompletionMessageParam } from 'groq-sdk/resources/chat/completions'
 
 dotenv.config()
 
@@ -26,7 +27,7 @@ export const analyzeIntent = async (query: string): Promise<GroqIntent> => {
     query = query.replace(/\bcue\b/g, 'queue')
 
     let botContext = getMessageHistory(BOT_USER_ID)
-    const messageHistory = [] as ChatMessage[]
+    const messageHistory: ChatCompletionMessageParam[] = []
     messageHistory.push({ role: 'user', content: sanitizeInputText(query) })
 
     // Handle the API call to groqClient with proper error handling
@@ -51,23 +52,13 @@ export const analyzeIntent = async (query: string): Promise<GroqIntent> => {
             - If the input is a single word and matches an intent, set the intent to match.
             - If the first word matches an intent, remove the first word from 'original_query'
             - If the input includes phrases like "some music", "anything", "whatever", "random song", or similar, and does not specify a particular artist, genre, or track, set the intent to roulette.
-            - This includes vague requests like "play some music", "play whatever", "play anything", "give me a random song".
             - Prioritize this rule over matching "play" as an intent.
             - If the input contains multiple uses of "cancel" or "nevermind", set intent to cancel.
             - If the input starts with a question word (who, what, when, where, why, how, which, whose, whom), set intent to question.
-            - If the input contains things like "tell me more", "explain that", or "elaborate", use intent elaborate.
-            - If the input mentions "stop", "pause", or similar, set intent to stop.
-            - If it includes "resume", "unpause", or "keep going", use unpause.
-            - If it says "skip", "next song", or "go to the next", set intent to skip.
-            - If it says "play after this" or "play this after", use intent play_after.
-            - If the user asks for random music (e.g. "random song", "surprise me", "play anything"), set intent to roulette.
+            - If the input says "play after this" or "play this after", use intent play_after.
             - If the user to play some music (e.g. "some music", "surprise me", "play anything") and does not appear to be specific, set intent to roulette.
             - If the query mentions a number (like "5 random songs"), extract it as count. If not, set count to 1.
-            - If the query starts with "queue", use intent queue.
-            - If it starts with "play next", use play_next.
-            - If it starts with "play", use intent play.
             - If both "play" and "queue" are mentioned, prioritize queue over play, unless play_after matched earlier.
-            - If no rule matches, set intent to unknown.
             - Always ensure "original_query" is a string, even if empty.
             - "count" should be an empty string unless specified by the user (e.g., "play 3 songs").
             - If the user asks for "a couple", "a few", "some" or "random songs" (plural), set count to 5.
@@ -258,6 +249,7 @@ export const colloquialAgent = async (originalQuery: string, detailedResponse: s
         {
           role: 'system',
           content: `
+          No matter what, do not say "colloquial response: " or "detailed response: "
           The user does not have knowledge of the input you are provided with
 ${detailedResponse && `give an answer to the user based on this information: ${detailedResponse}`}
 You are an AI that takes the result from a web searching agent and processes it for a user.
@@ -269,7 +261,6 @@ Example response: "I'm not sure what that is"
 Do not give your opinion on the topic
 Don't add your own conclusion to the repsonse
 Do not start your response with "I think" or "I believe"
-Do not say "colloquial response: " or "detailed response: "
 Sparsely add woof to the end of your responses
 `,
         },

@@ -1,7 +1,4 @@
-import {
-  InteractionContextType,
-  SlashCommandBuilder,
-} from 'discord.js'
+import { InteractionContextType, SlashCommandBuilder } from 'discord.js'
 
 export default {
   data: new SlashCommandBuilder()
@@ -9,10 +6,6 @@ export default {
     .setDescription('Disables voice commands')
     .setContexts(InteractionContextType.Guild),
   async execute(interaction: any) {
-    interaction.client.setVoiceCommands(false)
-
-    await interaction.reply({
-      content: 'Voice commands disabled!',
-    })
+    await interaction.client.setVoiceCommands(false)
   },
 }

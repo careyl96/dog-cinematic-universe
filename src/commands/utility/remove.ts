@@ -1,5 +1,5 @@
 import { InteractionContextType, SlashCommandBuilder } from 'discord.js'
-import { remove } from '../../helpers/playerFunctions'
+import { removeFromQueue } from '../../helpers/playerFunctions'
 
 export default {
   data: new SlashCommandBuilder()
@@ -16,6 +16,6 @@ export default {
   async execute(interaction: any) {
     const start = interaction.options.getInteger('start') || interaction.client.musicPlayer.queue.length
     const end = interaction.options.getInteger('end')
-    await remove(start, end, interaction)
+    await removeFromQueue({ start, end, interaction })
   },
 }

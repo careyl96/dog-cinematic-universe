@@ -4,7 +4,7 @@ import { pipeline } from 'node:stream/promises'
 import prism from 'prism-media'
 import { createWriteStream } from 'fs'
 import { ClientWithCommands } from '../../ClientWithCommands'
-import path from 'node:path'
+import path from 'path'
 import { PATH, TRIGGER_WORDS } from '../../constants'
 import ffmpegPath from 'ffmpeg-static'
 import ffmpeg from 'fluent-ffmpeg'
@@ -152,7 +152,6 @@ export const transcribeAudioWithWhisper = async (audioFilePath: string): Promise
         ...formData.getHeaders(),
       },
       httpsAgent: agent,
-      timeout: 30000,
     }
 
     const whisperApi = `${process.env.WHISPER_API}/v1/audio/transcriptions`
@@ -164,7 +163,7 @@ export const transcribeAudioWithWhisper = async (audioFilePath: string): Promise
     })
   } catch (err: any) {
     console.error(err.message)
-    client.setVoiceCommands(false)
+    await client.setVoiceCommands(false)
     unlink(audioFilePath, (err) => {
       if (err) console.error(err)
     })
@@ -189,8 +188,6 @@ export const fetchModels = async () => {
     const modelList = models.data.data
       .filter((model: any) => model.id.includes('whisper-large-v3-turbo'))
       .map((model: any) => model.id)
-    console.log('✅ === Whisper server connection successfully established === ✅')
-    client.setVoiceCommands(true)
     return models.data.data
   } catch (err: any) {
     console.error(err.message)

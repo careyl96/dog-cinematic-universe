@@ -3,6 +3,7 @@ import path from 'path'
 import { InteractionContextType, MessageFlags, SlashCommandBuilder } from 'discord.js'
 import { PATH } from '../../constants'
 import { createLikedEmbed } from '../../helpers/embedHelpers'
+import { escapeDiscordMarkdown } from '../../helpers/formatterHelpers'
 
 export default {
   data: new SlashCommandBuilder()
@@ -24,7 +25,7 @@ export default {
 
         if (likedSongs.length > 0) {
           const likedSongsEmbedText = likedSongs
-            .map((item, index) => `[${index + 1}] [${item.title}](${item.url})`)
+            .map((item, index) => `[${index + 1}] [${escapeDiscordMarkdown(item.title)}](${item.url})`)
             .join('\n')
 
           interaction.reply({

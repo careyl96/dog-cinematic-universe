@@ -1,7 +1,4 @@
-import {
-  InteractionContextType,
-  SlashCommandBuilder,
-} from 'discord.js'
+import { InteractionContextType, SlashCommandBuilder } from 'discord.js'
 import { unpause } from '../../helpers/playerFunctions'
 
 export default {
@@ -10,6 +7,6 @@ export default {
     .setDescription('Unpauses audio player')
     .setContexts(InteractionContextType.Guild),
   async execute(interaction: any) {
-    unpause()
+    await unpause()
   },
 }

@@ -1,17 +1,16 @@
 import fs from 'fs'
 import youtubeDl from 'youtube-dl-exec'
 import ytdl from '@distube/ytdl-core'
-
 import axios from 'axios'
+
 import { Readable } from 'form-data'
 import { fetchPlaylistViaYts, fetchViaYTS } from './ytsHelpers'
-import {
-  extractYouTubeIdFromUrl,
-  FormattedYoutubeVideo,
-  formatYoutubeVideoFromIdSearch,
-  isValidYoutubeUrl,
-} from './youtubeFormatterHelpers'
+import { FormattedYoutubeVideo, formatYoutubeVideoFromIdSearch } from './youtubeFormatterHelpers'
 import { PassThrough } from 'stream'
+import { client } from '../..'
+import { createErrorEmbed } from '../embedHelpers'
+import { MessageFlags } from 'discord.js'
+import { getVideoDataFromCache } from '../cacheHelpers'
 
 // fetches single youtube video via youtube api and returns formatted video for music player using videoId
 const fetchYoutubeVideoById = async (videoId: string) => {
@@ -70,59 +69,104 @@ const fetchYoutubeVideoByQuery = async (urlOrQuery: string) => {
 // https://developers.google.com/youtube/v3/getting-started#quota
 // https://developers.google.com/youtube/v3/docs/errors
 // fetches a single youtube video based on url or query
-export const fetchYoutubeVideoFromUrlOrQuery = async (options: {
+export const fetchYoutubeVideosFromUrlOrQuery = async ({
+  urlOrQuery,
+  useYts = false,
+  interaction,
+}: {
   urlOrQuery: string
   useYts?: boolean
+  interaction?: any
 }): Promise<FormattedYoutubeVideo | FormattedYoutubeVideo[]> => {
-  const { urlOrQuery, useYts = false } = options
+  const item = detectSource(urlOrQuery)
 
-  const isUrl = isValidYoutubeUrl(urlOrQuery)
-  let playlistId: string | null = null
-  let videoId: string | null = null
-
-  if (isUrl) {
-    try {
-      const url = new URL(urlOrQuery)
-      playlistId = url.searchParams.get('list')
-      const vParam = url.searchParams.get('v')
-
-      if (!playlistId && vParam) {
-        videoId = extractYouTubeIdFromUrl(urlOrQuery) as string
+  // yts fallback
+  const fallback = async () => {
+    // When query is a Youtube link, handle playlists or single videos
+    if (item.source === 'youtube') {
+      if (item.type === 'playlist') {
+        return fetchPlaylistViaYts(urlOrQuery)
+      } else if (item.type === 'single') {
+        const cachedVideo = getVideoDataFromCache(item.id)
+        return cachedVideo
+          ? cachedVideo
+          : await fetchViaYTS({
+              query: urlOrQuery,
+              isUrl: true,
+              videoId: item.id,
+            })
       }
-    } catch (err) {
-      console.warn('Failed to parse YouTube URL:', err)
     }
-  }
+    // When query is a Spotify link, handle playlists or single tracks
+    if (item.source === 'spotify') {
+      if (item.type === 'playlist') {
+        const trackNames = await client.spotify.getPlaylistTracks(urlOrQuery, 50)
 
-  const useYtsFallback = async () => {
-    console.log('##### Using yt-search fallback')
-    if (playlistId) {
-      console.log('###### Detected playlist URL')
-      return fetchPlaylistViaYts(urlOrQuery)
+        const videos: FormattedYoutubeVideo[] = []
+        for (let trackName of trackNames) {
+          videos.push(
+            await fetchViaYTS({
+              query: trackName,
+              isUrl: false,
+            })
+          )
+        }
+        return videos
+      } else if (item.type === 'single') {
+        const query = await client.spotify.getTrackNameAndAuthor(urlOrQuery)
+        return fetchViaYTS({ query, isUrl: false })
+      }
     }
-    return fetchViaYTS(urlOrQuery, isUrl, videoId)
+
+    // If query isn't a link, fetch via raw query
+    return await fetchViaYTS({ query: urlOrQuery, isUrl: false })
   }
 
   try {
     if (useYts) {
-      return await useYtsFallback()
+      const video = await fallback()
+      return video
     }
 
-    if (playlistId) {
-      return await fetchYoutubePlaylistById(playlistId)
+    if (item.source === 'youtube') {
+      if (item.type === 'playlist') {
+        return await fetchYoutubePlaylistById(item.id)
+      } else if (item.type === 'single') {
+        const cachedVideo = getVideoDataFromCache(item.id)
+        return cachedVideo ? cachedVideo : await fetchYoutubeVideoById(item.id)
+      }
     }
 
-    return isUrl ? await fetchYoutubeVideoById(videoId!) : await fetchYoutubeVideoByQuery(urlOrQuery)
-  } catch (err: any) {
-    console.warn('YouTube API failed, falling back to yt-search')
-    console.warn('Query:', urlOrQuery)
-    if (videoId) console.warn('Extracted videoId:', videoId)
+    if (item.source === 'spotify') {
+      if (item.type === 'playlist') {
+        const trackNames = await client.spotify.getPlaylistTracks(urlOrQuery, 50)
+        const videos: FormattedYoutubeVideo[] = []
+        for (let trackName of trackNames) {
+          videos.push(await fetchYoutubeVideoByQuery(trackName))
+        }
+        return videos
+      } else if (item.type === 'single') {
+        const trackName = await client.spotify.getTrackNameAndAuthor(urlOrQuery)
+        return fetchYoutubeVideoByQuery(trackName)
+      }
+    }
 
+    return await fetchYoutubeVideoByQuery(urlOrQuery)
+  } catch (error) {
     try {
-      return await useYtsFallback()
-    } catch (fallbackErr: any) {
+      return await fallback()
+    } catch (fallbackErr) {
       console.error('Both YouTube API and yt-search failed:', fallbackErr)
-      throw new Error('Video unavailable')
+
+      const errorEmbed = createErrorEmbed({
+        errorMessage: `Video unavailable: ${urlOrQuery}`,
+        flags: MessageFlags.Ephemeral,
+      }) as any
+      if (interaction && !interaction.replied) {
+        interaction.followUp(errorEmbed)
+      } else {
+        client.musicPlayer?.textChannel?.send(errorEmbed)
+      }
     }
   }
 }
@@ -145,7 +189,8 @@ export const createYoutubeAudioStreamYtdl = (url: string): Readable => {
 
 // // creates the audio stream necessary for discord's audio player
 // // using youtube-dl-exec
-export const createYoutubeAudioStream = (url: string): Readable => {
+export const createYoutubeAudioStream = (video: FormattedYoutubeVideo): Readable => {
+  const { url } = video
   if (!url) throw new Error('YouTube video URL is undefined (createYoutubeAudioStream)')
 
   const process = youtubeDl.exec(
@@ -166,17 +211,53 @@ export const createYoutubeAudioStream = (url: string): Readable => {
 
   const audioStream = process.stdout
 
+  // Return stream for bot audio streaming
   // Wrap the audio stream in a PassThrough to buffer and adjust the stream as needed
-  const bufferedStream = new PassThrough({
+  const passThrough = new PassThrough({
     highWaterMark: 128 * 1024, // Adjust buffer size to 128KB
   })
 
-  audioStream.pipe(bufferedStream)
+  audioStream.pipe(passThrough)
 
-  // Error handling for the stream
-  audioStream.on('error', (err) => {
-    console.error('Audio stream error:', err)
-  })
+  return passThrough
+}
 
-  return bufferedStream
+const detectSource = (
+  input: string
+): {
+  source: 'spotify' | 'youtube' | 'query'
+  query?: string
+  type?: 'single' | 'playlist'
+  id?: string
+} => {
+  // YouTube video URL
+  const youtubeVideoRegex = /^https:\/\/(?:www\.)?(?:youtube\.com\/watch\?v=|youtu\.be\/)([a-zA-Z0-9_-]{11})(?:&.*)?$/
+  const videoMatch = input.match(youtubeVideoRegex)
+  if (videoMatch) {
+    return { source: 'youtube', id: videoMatch[1], type: 'single' }
+  }
+
+  // YouTube playlist URL
+  const youtubePlaylistRegex = /^https:\/\/(?:www\.)?youtube\.com\/playlist\?list=([a-zA-Z0-9_-]+)(?:&.*)?$/
+  const ytPlaylistMatch = input.match(youtubePlaylistRegex)
+  if (ytPlaylistMatch) {
+    return { source: 'youtube', id: ytPlaylistMatch[1], type: 'playlist' }
+  }
+
+  // Spotify track URL
+  const spotifyTrackRegex = /^https:\/\/open\.spotify\.com\/track\/([a-zA-Z0-9]+)(\?.*)?$/
+  const trackMatch = input.match(spotifyTrackRegex)
+  if (trackMatch) {
+    return { source: 'spotify', id: trackMatch[1], type: 'single' }
+  }
+
+  // Spotify playlist URL
+  const spotifyPlaylistRegex = /^https:\/\/open\.spotify\.com\/playlist\/([a-zA-Z0-9]+)(\?.*)?$/
+  const playlistMatch = input.match(spotifyPlaylistRegex)
+  if (playlistMatch) {
+    return { source: 'spotify', id: playlistMatch[1], type: 'playlist' }
+  }
+
+  // Default to query (treated as single)
+  return { source: 'query', query: input }
 }

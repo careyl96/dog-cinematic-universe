@@ -1,7 +1,7 @@
-import { REST, Routes } from 'discord.js'
 import fs from 'node:fs'
-import path from 'node:path'
+import path from 'path'
 import dotenv from 'dotenv'
+import { REST, Routes } from 'discord.js'
 import { PATH } from './src/constants'
 
 dotenv.config()

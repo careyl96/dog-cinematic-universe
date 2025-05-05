@@ -4,7 +4,7 @@ process.on('warning', (warning) => {})
 import dotenv from 'dotenv'
 import { Collection, Events, GatewayIntentBits, MessageFlags } from 'discord.js'
 import fs from 'node:fs'
-import path from 'node:path'
+import path from 'path'
 import { ClientWithCommands } from './ClientWithCommands'
 import { PATH } from './constants'
 import { createErrorEmbed } from './helpers/embedHelpers'
@@ -78,7 +78,10 @@ client.on(Events.InteractionCreate, async (interaction) => {
     if (
       interaction.commandName === 'tts' ||
       interaction.commandName === 'play' ||
-      interaction.commandName === 'roulette' ||
+      // temp
+      interaction.commandName === 'cache' ||
+      interaction.commandName === 'noncached' ||
+      // /temp
       interaction.commandName === 'playprev' ||
       interaction.commandName === 'groq'
     ) {
@@ -95,7 +98,11 @@ client.on(Events.InteractionCreate, async (interaction) => {
       interaction.commandName === 'stop' ||
       interaction.commandName === 'skip' ||
       interaction.commandName === 'shuffle' ||
-      interaction.commandName === 'pause'
+      interaction.commandName === 'pause' ||
+      interaction.commandName === 'roulette' ||
+      interaction.commandName === 'enablevoicecommands' ||
+      interaction.commandName === 'disablevoicecommands' ||
+      interaction.commandName === 'unpause'
     ) {
       await interaction.deferReply()
       await interaction.deleteReply()
@@ -106,7 +113,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
     let errorMessage = `${error?.message}` || 'Something went very wrong oopsie woopsie woof report to Carey'
 
     if (interaction.replied || interaction.deferred) {
-      console.log(error)
+      console.log('index.ts error:', error)
       await interaction.followUp(
         createErrorEmbed({
           errorMessage: errorMessage,
@@ -114,7 +121,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
         }) as any
       )
     } else {
-      console.log(error)
+      console.log('index.ts replied error:', error)
       await interaction.reply(
         createErrorEmbed({
           errorMessage: errorMessage,

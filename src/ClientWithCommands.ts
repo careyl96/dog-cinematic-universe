@@ -18,19 +18,26 @@ import {
 } from 'discord.js'
 import { createReadStream } from 'fs'
 import { Readable } from 'stream'
-import { COMMANDS, TEXT_CHANNELS, TRIGGER_PHRASES, TRIGGER_WORDS } from './constants'
+import { COMMANDS, PATH, TEXT_CHANNELS, TRIGGER_PHRASES, TRIGGER_WORDS } from './constants'
 import { play, stop, unpause, skip, roulette } from './helpers/playerFunctions'
 import { YoutubeMusicPlayer } from './MusicPlayer'
 import { clearAudioFolders } from './helpers/clearAudioFolders'
 import { analyzeIntent, GroqIntent, masterVoiceAgent } from './helpers/voiceCommandHelpers/agents'
 import { createErrorEmbed } from './helpers/embedHelpers'
-import { parseCommandWordAndQuery, transcodeUserVoiceInput } from './helpers/voiceCommandHelpers/voiceCommandHelpers'
+import {
+  fetchModels,
+  parseCommandWordAndQuery,
+  transcodeUserVoiceInput,
+} from './helpers/voiceCommandHelpers/voiceCommandHelpers'
 import {
   flattenCommandList,
   getCurrentTimestamp,
   isSingleWord,
   removeFirstIntentWord,
 } from './helpers/formatterHelpers'
+import { SpotifyManager } from './SpotifyManager'
+import path from 'path'
+import { findLastPhraseIndex } from './helpers/otherHelpers'
 
 interface ExtendedOptions extends ClientOptions {
   connection?: VoiceConnection
@@ -55,13 +62,14 @@ export class ClientWithCommands extends Client {
   public temporaryPlayerQueue: AudioPlayer[]
 
   public musicPlayer: YoutubeMusicPlayer | null
+  public spotify: SpotifyManager | null
 
   constructor(options: ExtendedOptions) {
     super(options)
     this.commands = options.commands
     this.connection = options.connection
     this.voiceChannel = null
-    this.hasVoiceCommandsEnabled = false
+    this.hasVoiceCommandsEnabled = true
     this.activeSpeakers = new Set()
     this.player = createAudioPlayer({
       behaviors: {
@@ -71,24 +79,26 @@ export class ClientWithCommands extends Client {
     this.temporaryPlayerQueue = []
 
     this.musicPlayer = null
+    this.spotify = null
   }
 
   async init() {
-    clearAudioFolders()
+    // clearAudioFolders()
     const musicTextChannel = (await this.channels.fetch(TEXT_CHANNELS.MUSIC_BOT)) as TextChannel
 
     this.musicPlayer = new YoutubeMusicPlayer({
       textChannel: musicTextChannel,
     })
+    this.spotify = new SpotifyManager()
   }
 
   subscribeToClientPlayer() {
     if (!this.connection) throw new Error('Dog is not in a voice channel.')
     if (this.connection?.state.status === 'ready' && this.connection?.state.subscription?.player === this.player) {
-      console.log('##### Already subscribed to the audio player')
+      // console.log('##### Already subscribed to the audio player')
     } else {
       this.connection.subscribe(this.player)
-      console.log('##### Subscribed to audio player')
+      // console.log('##### Subscribed to audio player')
     }
   }
 
@@ -124,7 +134,7 @@ export class ClientWithCommands extends Client {
     } catch (error) {
       console.error('!!! Error joining voice channel:', error)
 
-      if (interaction) {
+      if (interaction && !interaction.replied) {
         interaction.reply(
           createErrorEmbed({
             errorMessage: 'There was an error joining the voice channel; playing command anyways',
@@ -145,7 +155,7 @@ export class ClientWithCommands extends Client {
         if (interaction) {
           throw new Error('Dog is not connected to a voice channel. (ensureVoiceConnection)')
         } else {
-          console.error('Dog is not connected to a voice channel. (ensureVoiceConnection)')
+          // console.error('Dog is not connected to a voice channel. (ensureVoiceConnection)')
           return false
         }
       }
@@ -257,7 +267,7 @@ export class ClientWithCommands extends Client {
     setTimeout(() => {
       this.subscribeToClientPlayer()
       this.player.play(audioResource)
-    }, 1000)
+    }, 100)
 
     const prevPlayer = this.temporaryPlayerQueue.pop()
 
@@ -293,7 +303,14 @@ export class ClientWithCommands extends Client {
   }
 
   // ----------------------------- VOICE COMMANDS -----------------------------
-  setVoiceCommands(value: boolean) {
+  async setVoiceCommands(value: boolean) {
+    if (value === this.hasVoiceCommandsEnabled) return
+    if (value === false) {
+      this.playAudioFromFilePath({ audioFilePath: path.join(PATH.AUDIO_FILES.DEFAULT, 'whimper.mp3') })
+    } else if (value === true) {
+      await fetchModels()
+      this.playAudioFromFilePath({ audioFilePath: path.join(PATH.AUDIO_FILES.DEFAULT, 'ba.mp3') })
+    }
     this.hasVoiceCommandsEnabled = value
     this.joinVoiceChannel(this.voiceChannel?.id, null, true)
   }
@@ -305,9 +322,11 @@ export class ClientWithCommands extends Client {
     console.log(chatLog)
 
     const allCommands = flattenCommandList(COMMANDS)
-    text = text.toLowerCase().replace(/[^\w\s]/g, '')
+    text = text
+      .toLowerCase()
+      .replace(/[^\w\s]/g, '')
+      .trim()
     const words = text.split(' ')
-
     let [commandWord, query] = parseCommandWordAndQuery(words, allCommands)
     let commandMap = this.createCommandMap(user, query)
 
@@ -326,7 +345,8 @@ export class ClientWithCommands extends Client {
       let triggerIndex = -1
 
       for (const phrase of TRIGGER_PHRASES) {
-        const idx = text.lastIndexOf(phrase)
+        const phraseWords = phrase.split(' ')
+        const idx = findLastPhraseIndex(words, phraseWords)
         if (idx > triggerIndex) {
           triggerIndex = idx
           matchedTrigger = phrase
@@ -334,8 +354,12 @@ export class ClientWithCommands extends Client {
       }
 
       // Special case: starts with "a dog"
-      if (text.startsWith('a dog')) {
-        matchedTrigger = 'a dog'
+      if (text.startsWith('a dog') || text.startsWith('a dogs')) {
+        if (text.startsWith('a dogs')) {
+          matchedTrigger = 'a dogs'
+        } else if (text.startsWith('a dog')) {
+          matchedTrigger = 'a dog'
+        }
         triggerIndex = 0
       }
 
@@ -343,6 +367,7 @@ export class ClientWithCommands extends Client {
 
       // Slice *after* the entire matched trigger phrase
       text = text.substring(triggerIndex + matchedTrigger.length).trim()
+      console.log('text: ', text)
       ;[commandWord, query] = parseCommandWordAndQuery(text.split(' '), allCommands)
     }
 
@@ -357,6 +382,10 @@ export class ClientWithCommands extends Client {
   }
 
   runSpokenCommand = async (user: any, command: string) => {
+    if (command.trim() === 'skip') {
+      await skip(user.id)
+      return
+    }
     try {
       const parsedResponse = await analyzeIntent(command)
       console.log(parsedResponse)
@@ -402,12 +431,12 @@ export class ClientWithCommands extends Client {
       }
     }
 
-    const playCommand = async () => await play({ user, query, force: true })
-    const queueCommand = async () => await play({ user, query })
+    const playCommand = async () => await play({ user, query, force: true, saveToHistory: true })
+    const queueCommand = async () => await play({ user, query, saveToHistory: true })
     const stopCommand = async () => await stop()
     const unpauseCommand = async () => await unpause()
     const skipCommand = async () => await skip(user.id)
-    const rouletteCommand = async () => await roulette(user.id, parseInt(groqIntent?.count, 10) || 1)
+    const rouletteCommand = async () => await roulette({ userId: user.id, count: parseInt(groqIntent?.count, 10) || 1 })
 
     createAliasGroup(COMMANDS.PLAY, playCommand)
     createAliasGroup(COMMANDS.QUEUE, queueCommand)
@@ -416,7 +445,7 @@ export class ClientWithCommands extends Client {
     createAliasGroup(COMMANDS.SKIP, skipCommand)
     createAliasGroup(COMMANDS.ROULETTE, rouletteCommand)
 
-    commandMap['play_after'] = async () => await play({ user, query, queueInPosition: 0 })
+    commandMap['play_after'] = async () => await play({ user, query, queueInPosition: 0, saveToHistory: true })
     commandMap['clear'] = async () => await this.musicPlayer?.clearQueue()
 
     return commandMap

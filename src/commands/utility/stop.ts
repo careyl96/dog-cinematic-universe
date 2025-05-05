@@ -1,8 +1,4 @@
-import {
-  ChatInputCommandInteraction,
-  InteractionContextType,
-  SlashCommandBuilder,
-} from 'discord.js'
+import { ChatInputCommandInteraction, InteractionContextType, SlashCommandBuilder } from 'discord.js'
 import { stop } from '../../helpers/playerFunctions'
 
 export default {
@@ -11,6 +7,6 @@ export default {
     .setDescription('Pauses audio player')
     .setContexts(InteractionContextType.Guild),
   async execute(interaction: ChatInputCommandInteraction) {
-    stop()
+    await stop()
   },
 }

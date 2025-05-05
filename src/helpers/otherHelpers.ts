@@ -1,6 +1,9 @@
+import path from 'path'
+import { readdir, stat, unlink } from 'fs/promises'
 import dotenv from 'dotenv'
-import { Message, TextChannel } from 'discord.js'
+import { Message } from 'discord.js'
 import { client } from '..'
+import { MAX_AUDIO_FILES } from '../constants'
 
 dotenv.config()
 
@@ -39,29 +42,6 @@ export const shuffle = (array: any) => {
   return array
 }
 
-export const emoji = ({ name, id }: { name: string; id: string }): string => {
-  return `<:${name}:${id}>`
-}
-
-export const removeSkipReactionsFromBot = async (
-  channel: TextChannel,
-  botUserId: string,
-  limit: number = 100
-): Promise<void> => {
-  const messages: Message[] = await fetchMessages(channel, limit)
-
-  for (const message of messages) {
-    const reaction = message.reactions.cache.get('⏭️')
-    if (reaction) {
-      try {
-        await reaction.users.remove(botUserId)
-      } catch (err) {
-        console.error(`Failed to remove ⏭️ from message ${message.id}:`, err)
-      }
-    }
-  }
-}
-
 export const getGuildMember = async (userId: string) => {
   try {
     const guild = await client.guilds.fetch(process.env.DISCORD_GUILD_ID!)
@@ -71,4 +51,59 @@ export const getGuildMember = async (userId: string) => {
     console.error('Failed to fetch guild member:', error)
     return null
   }
+}
+
+/**
+ * Maintains a sliding window of the most recent audio files in a folder.
+ * Deletes the oldest files if the limit is exceeded.
+ */
+export const enforceFileLimit = async (folder: string): Promise<void> => {
+  interface FileStat {
+    file: string
+    mtime: Date
+  }
+
+  try {
+    // Read all files in the folder
+    const allFiles: string[] = await readdir(folder)
+
+    // Only keep .ogg files
+    const oggFiles = allFiles.filter((file) => path.extname(file).toLowerCase() === '.ogg')
+
+    const fileStats: FileStat[] = await Promise.all(
+      oggFiles.map(async (file): Promise<FileStat> => {
+        const fullPath = path.join(folder, file)
+        const stats = await stat(fullPath)
+        return { file: fullPath, mtime: stats.mtime }
+      })
+    )
+
+    // Sort by modified time (oldest first)
+    fileStats.sort((a, b) => a.mtime.getTime() - b.mtime.getTime())
+
+    // Delete oldest files if over the limit
+    while (fileStats.length >= MAX_AUDIO_FILES) {
+      const toDelete = fileStats.shift()
+      if (toDelete) {
+        await unlink(toDelete.file)
+        console.log(`Enforcing cached audio file limit: deleted old .ogg file: ${toDelete.file}`)
+      }
+    }
+  } catch (err) {
+    console.error('Failed to enforce .ogg file limit:', err)
+  }
+}
+
+export const findLastPhraseIndex = (words: string[], phraseWords: string[]): number => {
+  for (let i = words.length - phraseWords.length; i >= 0; i--) {
+    let matched = true
+    for (let j = 0; j < phraseWords.length; j++) {
+      if (words[i + j] !== phraseWords[j]) {
+        matched = false
+        break
+      }
+    }
+    if (matched) return i
+  }
+  return -1
 }
