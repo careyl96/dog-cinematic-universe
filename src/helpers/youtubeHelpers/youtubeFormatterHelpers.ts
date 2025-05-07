@@ -52,6 +52,7 @@ export const formatDuration = (isoDuration: string) => {
   return formattedTime
 }
 
+// takes the time from the title and returns the time formatted to ISO (e.g. 3:27 -> PT3M27S)
 export const parseTitleWithDurationToIso = (input: string) => {
   const match = input.match(/\((\d+):(\d+)/)
   if (!match) return null

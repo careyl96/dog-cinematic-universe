@@ -4,15 +4,10 @@ import { EmbedBuilder, GuildMember } from 'discord.js'
 import { client } from '..'
 import { fetchYoutubeVideoFromUrlOrQuery } from './youtubeHelpers/youtubeHelpers'
 import { AudioPlayerStatus } from '@discordjs/voice'
-import { BOT_USER_ID, PATH, TEXT_CHANNELS } from '../constants'
-import { fetchMessages, getGuildMember } from './otherHelpers'
+import { BOT_USER_ID, PATH } from '../constants'
+import { getGuildMember } from './otherHelpers'
 import { shuffle } from './otherHelpers'
-import {
-  createYoutubeUrlFromId,
-  extractYouTubeIdFromUrl,
-  FormattedYoutubeVideo,
-} from './youtubeHelpers/youtubeFormatterHelpers'
-import { getVideoDataFromMessage } from './embedHelpers'
+import { createYoutubeUrlFromId, FormattedYoutubeVideo } from './youtubeHelpers/youtubeFormatterHelpers'
 import { getUserMusicHistory } from './musicDataHelpers'
 import { getRandomKeys } from '../commands/utility/roulette'
 
@@ -53,10 +48,6 @@ export const play = async (options: {
   }
 }
 
-export const playPrev = async (interaction: any) => {
-  await client.musicPlayer?.playPrev(interaction)
-}
-
 type QueueOptions = {
   user: GuildMember
   query: string | string[]
@@ -80,8 +71,9 @@ export const queue = async ({ user, query, interaction, saveHistory = true }: Qu
       for (const query of queries) {
         const video = (await fetchYoutubeVideoFromUrlOrQuery({
           urlOrQuery: query,
+          interaction,
         })) as FormattedYoutubeVideo
-        videos.push(video)
+        if (video) videos.push(video)
       }
       await client.musicPlayer!.enqueue({
         videosToQueue: videos,
@@ -104,7 +96,26 @@ export const shuffleQueue = async (userId: string) => {
     throw err
   }
 }
-export const remove = async (start: number, end?: number, interaction?: any) => {
+export const removeFromQueue = async ({
+  start = 1,
+  end,
+  videoId,
+  interaction,
+}: {
+  start?: number
+  end?: number
+  videoId?: string
+  interaction?: any
+}) => {
+  if (videoId) {
+    const index = client.musicPlayer.queue.findIndex((item) => item.video.id === videoId)
+    if (index !== -1) {
+      client.musicPlayer.queue.splice(index, 1)
+    }
+    client.musicPlayer.sendOrUpdateQueueEmbed()
+    return interaction && interaction.deleteReply()
+  }
+
   if (start < 1 || start > client.musicPlayer.queue.length) {
     return interaction && interaction.deleteReply()
   }

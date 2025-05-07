@@ -13,7 +13,8 @@ import {
 } from './youtubeFormatterHelpers'
 import { PassThrough } from 'stream'
 import { client } from '../..'
-import { createYoutubeEmbed } from '../embedHelpers'
+import { createErrorEmbed, createYoutubeEmbed } from '../embedHelpers'
+import { MessageFlags } from 'discord.js'
 
 // fetches single youtube video via youtube api and returns formatted video for music player using videoId
 const fetchYoutubeVideoById = async (videoId: string) => {
@@ -75,9 +76,11 @@ const fetchYoutubeVideoByQuery = async (urlOrQuery: string) => {
 export const fetchYoutubeVideoFromUrlOrQuery = async ({
   urlOrQuery,
   useYts = false,
+  interaction,
 }: {
   urlOrQuery: string
   useYts?: boolean
+  interaction?: any
 }): Promise<FormattedYoutubeVideo | FormattedYoutubeVideo[]> => {
   const isUrl = isValidYoutubeUrl(urlOrQuery)
   let playlistId: string | null = null
@@ -113,7 +116,16 @@ export const fetchYoutubeVideoFromUrlOrQuery = async ({
       return await fallback()
     } catch (fallbackErr) {
       console.error('Both YouTube API and yt-search failed:', fallbackErr)
-      throw new Error(`Video unavailable: ${urlOrQuery}`)
+
+      const errorEmbed = createErrorEmbed({
+        errorMessage: `Video unavailable: ${urlOrQuery}`,
+        flags: MessageFlags.Ephemeral,
+      }) as any
+      if (interaction && !interaction.replied) {
+        interaction.followUp(errorEmbed)
+      } else {
+        client.musicPlayer?.textChannel?.send(errorEmbed)
+      }
     }
   }
 }

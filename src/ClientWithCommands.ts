@@ -124,7 +124,7 @@ export class ClientWithCommands extends Client {
     } catch (error) {
       console.error('!!! Error joining voice channel:', error)
 
-      if (interaction) {
+      if (interaction && !interaction.replied) {
         interaction.reply(
           createErrorEmbed({
             errorMessage: 'There was an error joining the voice channel; playing command anyways',
@@ -357,6 +357,10 @@ export class ClientWithCommands extends Client {
   }
 
   runSpokenCommand = async (user: any, command: string) => {
+    if (command.trim() === 'skip') {
+      await skip(user.id)
+      return
+    }
     try {
       const parsedResponse = await analyzeIntent(command)
       console.log(parsedResponse)

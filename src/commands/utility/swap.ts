@@ -1,31 +1,17 @@
-import {
-  SlashCommandBuilder,
-  ChatInputCommandInteraction,
-  MessageFlags,
-} from 'discord.js'
+import { SlashCommandBuilder, MessageFlags } from 'discord.js'
 import { YoutubeMusicPlayer } from '../../MusicPlayer'
 
 // Utility to move an item in an array from one position to another
-const moveTrack = (
-  musicPlayer: YoutubeMusicPlayer,
-  queue: any[],
-  fromIndex: number,
-  toIndex: number
-) => {
+const moveTrack = async (musicPlayer: YoutubeMusicPlayer, queue: any[], fromIndex: number, toIndex: number) => {
   const item = queue.splice(fromIndex, 1)[0]
   queue.splice(toIndex, 0, item)
-  musicPlayer.sendOrUpdateQueueEmbed()
+  await musicPlayer.sendOrUpdateQueueEmbed()
 }
 
 // Utility to swap two items in an array
-const swapTracks = (
-  musicPlayer: YoutubeMusicPlayer,
-  queue: any[],
-  indexA: number,
-  indexB: number
-) => {
+const swapTracks = async (musicPlayer: YoutubeMusicPlayer, queue: any[], indexA: number, indexB: number) => {
   ;[queue[indexA], queue[indexB]] = [queue[indexB], queue[indexA]]
-  musicPlayer.sendOrUpdateQueueEmbed()
+  await musicPlayer.sendOrUpdateQueueEmbed()
 }
 
 export default {
@@ -37,10 +23,7 @@ export default {
         .setName('movetotop')
         .setDescription('Move a track to the top of the queue')
         .addIntegerOption((option) =>
-          option
-            .setName('position')
-            .setDescription('Position of the track to move to the top')
-            .setRequired(true)
+          option.setName('position').setDescription('Position of the track to move to the top').setRequired(true)
         )
     )
     .addSubcommand((sub) =>
@@ -48,16 +31,10 @@ export default {
         .setName('swap')
         .setDescription('Swap two tracks in the queue')
         .addIntegerOption((option) =>
-          option
-            .setName('position1')
-            .setDescription('First track position')
-            .setRequired(true)
+          option.setName('position1').setDescription('First track position').setRequired(true)
         )
         .addIntegerOption((option) =>
-          option
-            .setName('position2')
-            .setDescription('Second track position')
-            .setRequired(true)
+          option.setName('position2').setDescription('Second track position').setRequired(true)
         )
     ),
 
@@ -94,7 +71,7 @@ export default {
       }
 
       const trackName = queue[position].video.title
-      moveTrack(musicPlayer, queue, position, 0)
+      await moveTrack(musicPlayer, queue, position, 0)
 
       interaction.client.musicPlayer.sendOrUpdateQueueEmbed()
       interaction.reply({
@@ -111,12 +88,7 @@ export default {
       const pos1 = interaction.options.getInteger('position1')! - 1
       const pos2 = interaction.options.getInteger('position2')! - 1
 
-      if (
-        pos1 < 0 ||
-        pos2 < 0 ||
-        pos1 >= queue.length ||
-        pos2 >= queue.length
-      ) {
+      if (pos1 < 0 || pos2 < 0 || pos1 >= queue.length || pos2 >= queue.length) {
         interaction.reply({
           content: 'One or both positions are invalid.',
           flags: MessageFlags.Ephemeral,
@@ -127,7 +99,7 @@ export default {
         return
       }
 
-      swapTracks(musicPlayer, queue, pos1, pos2)
+      await swapTracks(musicPlayer, queue, pos1, pos2)
 
       return interaction.reply({
         content: `Swapped track #${pos1 + 1} with track #${pos2 + 1}.`,

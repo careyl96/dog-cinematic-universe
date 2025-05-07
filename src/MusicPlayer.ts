@@ -11,9 +11,8 @@ import { fetchYoutubeVideoFromUrlOrQuery } from './helpers/youtubeHelpers/youtub
 import { createQueueEmbed, createYoutubeEmbed, NowPlayingEmbedState } from './helpers/embedHelpers'
 import { BOT_USER_ID, PATH } from './constants'
 import { Readable } from 'stream'
-import { existsSync, readFileSync } from 'fs'
 import { FormattedYoutubeVideo } from './helpers/youtubeHelpers/youtubeFormatterHelpers'
-import { createOrUpdateUserMusicHistory, updateHistoryFile } from './helpers/musicDataHelpers'
+import { updateHistoryFile } from './helpers/musicDataHelpers'
 import { shuffle } from './helpers/otherHelpers'
 import { getCurrentTimestamp } from './helpers/formatterHelpers'
 
@@ -25,16 +24,18 @@ interface YoutubeMusicPlayerOptions {
 interface PlayOptions {
   query: string
   userId: string
-  interaction?: ChatInputCommandInteraction
+  overrideCurrentEmbed?: boolean
   queueInPosition?: number
+  interaction?: ChatInputCommandInteraction
 }
 
 interface PlayAudioFromYoutubeOptions {
   video: FormattedYoutubeVideo
   userId: string
   saveHistory?: boolean
-  interaction?: ChatInputCommandInteraction
   force?: boolean
+  overrideCurrentEmbed?: boolean
+  interaction?: ChatInputCommandInteraction
 }
 
 export type QueueItem = {
@@ -64,11 +65,10 @@ export class YoutubeMusicPlayer {
 
   public player: AudioPlayer
   private _queue: QueueItem[]
-  private currentlyPlaying: QueueItem
-  private previouslyPlayed: QueueItem
+  private _currentlyPlaying: QueueItem
   private audioStream: Readable = null
 
-  private nowPlayingEmbedInfo: NowPlayingEmbedInfo = {
+  private _nowPlayingEmbedInfo: NowPlayingEmbedInfo = {
     message: null,
     video: null,
     userId: null,
@@ -88,8 +88,7 @@ export class YoutubeMusicPlayer {
       },
     })
     this._queue = []
-    this.currentlyPlaying = null
-    this.previouslyPlayed = null
+    this._currentlyPlaying = null
   }
 
   private subscribeToMusicPlayer(interaction?: any) {
@@ -112,17 +111,20 @@ export class YoutubeMusicPlayer {
 
   // overrwrite currently playing song
   // used when using voice commands or when force option is selected
-  async forcePlay({ query, userId, interaction }: PlayOptions) {
+  async forcePlay({ query, userId, overrideCurrentEmbed = false, interaction }: PlayOptions) {
     this.subscribeToMusicPlayer(interaction)
+    const useYts = overrideCurrentEmbed ? false : true
     const video = (await fetchYoutubeVideoFromUrlOrQuery({
       urlOrQuery: query,
-      useYts: true,
+      useYts,
+      interaction,
     })) as any
 
     await this.playAudioFromYTVideo({
       video,
       userId,
       force: true,
+      overrideCurrentEmbed,
       interaction,
     })
   }
@@ -133,7 +135,12 @@ export class YoutubeMusicPlayer {
     const video = await fetchYoutubeVideoFromUrlOrQuery({
       urlOrQuery: query,
       useYts: this.player.state.status === AudioPlayerStatus.Idle,
+      interaction,
     })
+    if (!video) {
+      console.error('##### Error with video')
+      return
+    }
     await this.enqueue({ videosToQueue: video, userId, interaction, queueInPosition })
   }
 
@@ -173,48 +180,60 @@ export class YoutubeMusicPlayer {
   async playAudioFromYTVideo({
     video,
     userId,
-    interaction,
     saveHistory = true,
     force = false,
+    overrideCurrentEmbed = false,
+    interaction,
   }: PlayAudioFromYoutubeOptions) {
+    this.audioStream?.destroy()
     this.subscribeToMusicPlayer(interaction)
 
     try {
       if (this.player.state.status === AudioPlayerStatus.Idle || force) {
-        if (force) {
+        if (force && !overrideCurrentEmbed) {
           await this.stop({ skip: true, skippedByUserId: userId })
         }
 
         if (interaction && !interaction.replied) interaction.deleteReply()
 
         // send loading embed
-        this._textChannel
-          ?.send({
-            embeds: [
-              createYoutubeEmbed({
-                youtubeVideo: video,
-                userId,
-                upNext: this._queue[0],
-                state: 'loading',
-              }),
-            ],
-          })
-          .then((message) => {
-            this.nowPlayingEmbedInfo = {
-              ...this.nowPlayingEmbedInfo,
-              ...{ message, video, userId, state: 'loading' },
-            }
-            message.react('❤️')
-            message.react('🚫')
-            message.react('⏭️')
-            this.sendOrUpdateQueueEmbed()
-          })
+        if (overrideCurrentEmbed) {
+          this.editNowPlayingEmbed('loading')
+        } else {
+          this._textChannel
+            ?.send({
+              embeds: [
+                createYoutubeEmbed({
+                  youtubeVideo: video,
+                  userId,
+                  upNext: this._queue[0],
+                  state: 'loading',
+                }),
+              ],
+            })
+            .then((message) => {
+              this._nowPlayingEmbedInfo = {
+                ...this._nowPlayingEmbedInfo,
+                ...{ message, video, userId, state: 'loading' },
+              }
+              message.react('❤️')
+              message.react('🚫')
+              message.react('⏭️')
+              message.react('🔁')
+              this.sendOrUpdateQueueEmbed()
+            })
+        }
         /* -------------------------------------------------------------- */
         this.audioStream = createYoutubeAudioStream(video.url)
+
         const audioResource = createAudioResource(this.audioStream, {
           inlineVolume: true,
-          silencePaddingFrames: 10,
+          silencePaddingFrames: 5,
         })
+        // const audioResource = createAudioResource(`${PATH.AUDIO_FILES.GENERATED.YOUTUBE}/output.mp3`, {
+        //   inlineVolume: true,
+        //   silencePaddingFrames: 5,
+        // })
         audioResource.volume?.setVolume(0.5)
         this.player.play(audioResource)
         /* -------------------------------------------------------------- */
@@ -226,13 +245,11 @@ export class YoutubeMusicPlayer {
           })
           .once(AudioPlayerStatus.Playing, async () => {
             await this.editNowPlayingEmbed('playing')
-            this.previouslyPlayed = this.currentlyPlaying
             this.currentlyPlaying = { video, userId }
             console.log(`[${getCurrentTimestamp()}] 🎹 Now playing: ${video.title}`)
           })
           .on('error', async (err) => {
             await this.editNowPlayingEmbed('error', null, err)
-
             await this.stop()
             // await client.playAudioFromFilePath({
             //   audioFilePath: AUDIO_FILES.WHIMPER,
@@ -382,13 +399,15 @@ export class YoutubeMusicPlayer {
     }
   }
 
-  async stop(
-    { skip = false, skippedByUserId, error = null }: { skip?: boolean; skippedByUserId?: string; error?: any } = {
-      skip: false,
-      skippedByUserId: null,
-      error: null,
-    }
-  ) {
+  async stop({
+    skip = false,
+    skippedByUserId = null,
+    error = null,
+  }: {
+    skip?: boolean
+    skippedByUserId?: string
+    error?: any
+  } = {}) {
     let state: NowPlayingEmbedState = 'finished'
     if (error) state = 'error'
     if (skip) state = 'skipped'
@@ -397,24 +416,6 @@ export class YoutubeMusicPlayer {
     this.deleteQueueEmbed()
     this.player.stop()
     this.player.unpause()
-  }
-
-  playPrev(interaction: ChatInputCommandInteraction) {
-    if (!this.previouslyPlayed) {
-      interaction.deleteReply()
-      return
-    }
-
-    if (this.currentlyPlaying) {
-      this._queue.unshift(this.currentlyPlaying)
-    }
-    this.playAudioFromYTVideo({
-      video: this.previouslyPlayed?.video,
-      userId: this.previouslyPlayed?.userId!,
-      force: true,
-      interaction,
-    })
-    this.currentlyPlaying = null
   }
 
   async editNowPlayingEmbed(
@@ -426,7 +427,6 @@ export class YoutubeMusicPlayer {
     if (this.nowPlayingEmbedInfo.state === 'skipped') return
     if (this.nowPlayingEmbedInfo.state === 'error') return
     if (!this.nowPlayingEmbedInfo.message) return
-    // return console.log('##### NO NOW PLAYING EMBED MESSAGE FOUND')
 
     // console.log(`###### Track embed state: ${state}`)
     this.nowPlayingEmbedInfo.state = state
@@ -435,8 +435,8 @@ export class YoutubeMusicPlayer {
       this.nowPlayingEmbedInfo.state === 'skipped' ||
       this.nowPlayingEmbedInfo.state === 'error'
     ) {
-      const reaction = this.nowPlayingEmbedInfo.message.reactions.cache.get('⏭️')
-      if (reaction) reaction.users.remove(BOT_USER_ID).catch(console.error)
+      const skipReaction = this.nowPlayingEmbedInfo.message.reactions.cache.get('⏭️')
+      if (skipReaction) skipReaction.users.remove(BOT_USER_ID).catch(console.error)
     }
     await this.nowPlayingEmbedInfo.message
       ?.edit({
@@ -475,5 +475,18 @@ export class YoutubeMusicPlayer {
   }
   set queue(newQueue: QueueItem[]) {
     this._queue = newQueue
+  }
+  get currentlyPlaying() {
+    return this._currentlyPlaying
+  }
+  set currentlyPlaying({ video, userId }: QueueItem) {
+    this._currentlyPlaying = { video, userId }
+  }
+
+  get nowPlayingEmbedInfo() {
+    return this._nowPlayingEmbedInfo
+  }
+  set nowPlayingEmbedInfo({ message, video, userId, state }: NowPlayingEmbedInfo) {
+    this._nowPlayingEmbedInfo = { message, video, userId, state }
   }
 }

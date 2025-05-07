@@ -70,10 +70,7 @@ export default {
   },
 }
 
-export const playTTSAudio = async (
-  ttsText: string,
-  ttsVoice: string = 'am_michael'
-) => {
+export const playTTSAudio = async (ttsText: string, ttsVoice: string = 'am_michael') => {
   if (!ttsText) return
 
   const body = {
@@ -92,12 +89,8 @@ export const playTTSAudio = async (
     timeout: 60000,
   }
 
-  const response = await axios.post(
-    `${process.env.WHISPER_API}/v1/audio/speech`,
-    body,
-    config
-  ).catch((err) => {
-    console.error(err)
+  const response = await axios.post(`${process.env.WHISPER_API}/v1/audio/speech`, body, config).catch((err) => {
+    console.error('AXIOS TTS ERROR TTS.ts error code', err.code)
     throw new Error('TTS server did not respond')
   })
 

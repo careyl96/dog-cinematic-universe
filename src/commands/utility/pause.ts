@@ -1,8 +1,4 @@
-import {
-  ChatInputCommandInteraction,
-  InteractionContextType,
-  SlashCommandBuilder,
-} from 'discord.js'
+import { ChatInputCommandInteraction, InteractionContextType, SlashCommandBuilder } from 'discord.js'
 import { stop } from '../../helpers/playerFunctions'
 
 export default {
@@ -12,7 +8,7 @@ export default {
     .setContexts(InteractionContextType.Guild),
   async execute(interaction: ChatInputCommandInteraction) {
     try {
-      stop()
+      await stop()
     } catch (err) {
       throw err
     }

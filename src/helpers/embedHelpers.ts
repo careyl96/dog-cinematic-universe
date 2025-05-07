@@ -45,7 +45,7 @@ export const createYoutubeEmbed = (options: {
       color = 0x8c8c8c
       break
     case 'playing':
-      stateString = `Now playing:`  
+      stateString = `Now playing:`
       color = 0xa0c980
       break
     case 'paused':
@@ -141,6 +141,7 @@ export const getVideoDataFromMessage = (message: any): FormattedYoutubeVideo => 
   if (!isMusicEmbed) return
 
   const embedData = message.embeds[0].data
+
   const videoData: FormattedYoutubeVideo = {
     title: stripTimeFromTitle(embedData.title),
     url: embedData.url,
@@ -148,6 +149,5 @@ export const getVideoDataFromMessage = (message: any): FormattedYoutubeVideo => 
     duration: parseTitleWithDurationToIso(embedData.title),
     thumbnail: embedData.thumbnail.url,
   }
-
   return videoData
 }

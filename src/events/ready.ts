@@ -23,7 +23,6 @@ export default {
       `)
     await fetchModels()
     await client.migrateToMostPopulatedVoiceChannelOrDisconnect()
-
     cron.schedule('0 0 * * * *', playHourlyMusic)
     console.log('\n* ════════════════════════════════════════════════════════════════ *\n')
   },

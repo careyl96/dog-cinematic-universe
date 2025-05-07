@@ -43,25 +43,6 @@ export const emoji = ({ name, id }: { name: string; id: string }): string => {
   return `<:${name}:${id}>`
 }
 
-export const removeSkipReactionsFromBot = async (
-  channel: TextChannel,
-  botUserId: string,
-  limit: number = 100
-): Promise<void> => {
-  const messages: Message[] = await fetchMessages(channel, limit)
-
-  for (const message of messages) {
-    const reaction = message.reactions.cache.get('⏭️')
-    if (reaction) {
-      try {
-        await reaction.users.remove(botUserId)
-      } catch (err) {
-        console.error(`Failed to remove ⏭️ from message ${message.id}:`, err)
-      }
-    }
-  }
-}
-
 export const getGuildMember = async (userId: string) => {
   try {
     const guild = await client.guilds.fetch(process.env.DISCORD_GUILD_ID!)
@@ -72,3 +53,23 @@ export const getGuildMember = async (userId: string) => {
     return null
   }
 }
+
+// old function to clean up bot reactions in music bot channel
+// export const removeSkipReactionsFromBot = async (
+//   channel: TextChannel,
+//   botUserId: string,
+//   limit: number = 100
+// ): Promise<void> => {
+//   const messages: Message[] = await fetchMessages(channel, limit)
+
+//   for (const message of messages) {
+//     const reaction = message.reactions.cache.get('⏭️')
+//     if (reaction) {
+//       try {
+//         await reaction.users.remove(botUserId)
+//       } catch (err) {
+//         console.error(`Failed to remove ⏭️ from message ${message.id}:`, err)
+//       }
+//     }
+//   }
+// }
