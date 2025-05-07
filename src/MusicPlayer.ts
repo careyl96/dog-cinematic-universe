@@ -7,7 +7,7 @@ import {
 } from '@discordjs/voice'
 import { createYoutubeAudioStream } from './helpers/youtubeHelpers/youtubeHelpers'
 import { ChatInputCommandInteraction, Message, TextChannel } from 'discord.js'
-import { fetchYoutubeVideoFromUrlOrQuery } from './helpers/youtubeHelpers/youtubeHelpers'
+import { fetchYoutubeVideosFromUrlOrQuery } from './helpers/youtubeHelpers/youtubeHelpers'
 import { createQueueEmbed, createYoutubeEmbed, NowPlayingEmbedState } from './helpers/embedHelpers'
 import { BOT_USER_ID, PATH } from './constants'
 import { Readable } from 'stream'
@@ -114,7 +114,7 @@ export class YoutubeMusicPlayer {
   async forcePlay({ query, userId, overrideCurrentEmbed = false, interaction }: PlayOptions) {
     this.subscribeToMusicPlayer(interaction)
     const useYts = overrideCurrentEmbed ? false : true
-    const video = (await fetchYoutubeVideoFromUrlOrQuery({
+    const video = (await fetchYoutubeVideosFromUrlOrQuery({
       urlOrQuery: query,
       useYts,
       interaction,
@@ -132,16 +132,16 @@ export class YoutubeMusicPlayer {
   // this function is kind of useless since enqueue does the same thing more or less, TODO: remove
   // primary play function is in playerFunctions.ts
   async play({ query, userId, interaction, queueInPosition }: PlayOptions) {
-    const video = await fetchYoutubeVideoFromUrlOrQuery({
+    const videos: FormattedYoutubeVideo | FormattedYoutubeVideo[] = await fetchYoutubeVideosFromUrlOrQuery({
       urlOrQuery: query,
       useYts: this.player.state.status === AudioPlayerStatus.Idle,
       interaction,
     })
-    if (!video) {
-      console.error('##### Error with video')
+    if (!videos) {
+      console.error('##### Error with video(s)')
       return
     }
-    await this.enqueue({ videosToQueue: video, userId, interaction, queueInPosition })
+    await this.enqueue({ videosToQueue: videos, userId, interaction, queueInPosition })
   }
 
   async enqueue({ videosToQueue, userId, interaction, saveHistory = true, queueInPosition }: EnqueueOptions) {

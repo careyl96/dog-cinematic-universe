@@ -2,7 +2,7 @@ import fs from 'fs'
 import path from 'path'
 import { EmbedBuilder, GuildMember } from 'discord.js'
 import { client } from '..'
-import { fetchYoutubeVideoFromUrlOrQuery } from './youtubeHelpers/youtubeHelpers'
+import { fetchYoutubeVideosFromUrlOrQuery } from './youtubeHelpers/youtubeHelpers'
 import { AudioPlayerStatus } from '@discordjs/voice'
 import { BOT_USER_ID, PATH } from '../constants'
 import { getGuildMember } from './otherHelpers'
@@ -61,7 +61,7 @@ export const queue = async ({ user, query, interaction, saveHistory = true }: Qu
     const isVoiceConnectionEstablished = await client.ensureVoiceConnection(user, interaction)
     if (!isVoiceConnectionEstablished) return
 
-    // Function to handle both single query (string) and multiple queries (currently only using function for passing array of youtube urls)
+    // Function to handle both single query (string) and multiple queries (multiple only compatible with array of youtube urls)
     const enqueueVideos = async (queries: string | string[]) => {
       if (typeof queries === 'string') {
         queries = [queries]
@@ -69,7 +69,7 @@ export const queue = async ({ user, query, interaction, saveHistory = true }: Qu
 
       const videos = []
       for (const query of queries) {
-        const video = (await fetchYoutubeVideoFromUrlOrQuery({
+        const video = (await fetchYoutubeVideosFromUrlOrQuery({
           urlOrQuery: query,
           interaction,
         })) as FormattedYoutubeVideo

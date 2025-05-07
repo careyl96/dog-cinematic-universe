@@ -2,14 +2,18 @@ import yts from 'yt-search'
 import youtubeDl from 'youtube-dl-exec'
 import axios from 'axios'
 import { Readable } from 'form-data'
-import { createYoutubeUrlFromId, FormattedYoutubeVideo } from './youtubeFormatterHelpers'
+import { createYoutubeUrlFromId, FormattedYoutubeVideo, isValidYoutubeUrl } from './youtubeFormatterHelpers'
 
 // --- YT-Search helpers
-export const fetchViaYTS = async (
-  query: string,
-  isUrl: boolean,
-  videoId: string | null
-): Promise<FormattedYoutubeVideo> => {
+export const fetchViaYTS = async ({
+  query,
+  isUrl,
+  videoId,
+}: {
+  query: string
+  isUrl: boolean
+  videoId?: string | null
+}): Promise<FormattedYoutubeVideo> => {
   if (isUrl && videoId) {
     const response = await yts({ videoId })
     return formatYTSFromIdSearch(response)

@@ -31,6 +31,7 @@ import {
   isSingleWord,
   removeFirstIntentWord,
 } from './helpers/formatterHelpers'
+import { SpotifyManager } from './SpotifyManager'
 
 interface ExtendedOptions extends ClientOptions {
   connection?: VoiceConnection
@@ -55,6 +56,7 @@ export class ClientWithCommands extends Client {
   public temporaryPlayerQueue: AudioPlayer[]
 
   public musicPlayer: YoutubeMusicPlayer | null
+  public spotify: SpotifyManager | null
 
   constructor(options: ExtendedOptions) {
     super(options)
@@ -71,6 +73,7 @@ export class ClientWithCommands extends Client {
     this.temporaryPlayerQueue = []
 
     this.musicPlayer = null
+    this.spotify = null
   }
 
   async init() {
@@ -80,6 +83,7 @@ export class ClientWithCommands extends Client {
     this.musicPlayer = new YoutubeMusicPlayer({
       textChannel: musicTextChannel,
     })
+    this.spotify = new SpotifyManager()
   }
 
   subscribeToClientPlayer() {

@@ -73,7 +73,7 @@ const fetchYoutubeVideoByQuery = async (urlOrQuery: string) => {
 // https://developers.google.com/youtube/v3/getting-started#quota
 // https://developers.google.com/youtube/v3/docs/errors
 // fetches a single youtube video based on url or query
-export const fetchYoutubeVideoFromUrlOrQuery = async ({
+export const fetchYoutubeVideosFromUrlOrQuery = async ({
   urlOrQuery,
   useYts = false,
   interaction,
@@ -82,36 +82,68 @@ export const fetchYoutubeVideoFromUrlOrQuery = async ({
   useYts?: boolean
   interaction?: any
 }): Promise<FormattedYoutubeVideo | FormattedYoutubeVideo[]> => {
-  const isUrl = isValidYoutubeUrl(urlOrQuery)
-  let playlistId: string | null = null
-  let videoId: string | null = null
+  const item = detectSource(urlOrQuery)
 
-  if (isUrl) {
-    try {
-      const url = new URL(urlOrQuery)
-      playlistId = url.searchParams.get('list')
-      videoId = url.searchParams.get('v') || extractYouTubeIdFromUrl(urlOrQuery)
-    } catch (err) {
-      console.warn('Failed to parse YouTube URL:', err)
-    }
-  }
-
+  // yts fallback
   const fallback = async () => {
-    console.log('##### Using yt-search fallback')
-    return playlistId ? fetchPlaylistViaYts(urlOrQuery) : fetchViaYTS(urlOrQuery, isUrl, videoId)
+    if (item.source === 'youtube') {
+      if (item.type === 'playlist') {
+        return fetchPlaylistViaYts(urlOrQuery)
+      } else if (item.type === 'single') {
+        return fetchViaYTS({
+          query: urlOrQuery,
+          isUrl: true,
+        })
+      }
+    }
+    if (item.source === 'spotify') {
+      if (item.type === 'playlist') {
+        const trackNames = await client.spotify.getPlaylistTracks(urlOrQuery, 50)
+
+        const videos: FormattedYoutubeVideo[] = []
+        for (let trackName of trackNames) {
+          videos.push(
+            await fetchViaYTS({
+              query: trackName,
+              isUrl: false,
+            })
+          )
+        }
+        return videos
+      } else if (item.type === 'single') {
+        const query = await client.spotify.getTrackNameAndAuthor(urlOrQuery)
+        return fetchViaYTS({ query, isUrl: false })
+      }
+    }
   }
 
   try {
     if (useYts) return await fallback()
 
-    if (playlistId) return await fetchYoutubePlaylistById(playlistId)
-    if (isUrl && videoId) return await fetchYoutubeVideoById(videoId)
+    if (item.source === 'youtube') {
+      if (item.type === 'playlist') {
+        return await fetchYoutubePlaylistById(item.id)
+      } else if (item.type === 'single') {
+        return await fetchYoutubeVideoById(item.id)
+      }
+    }
+
+    if (item.source === 'spotify') {
+      if (item.type === 'playlist') {
+        const trackNames = await client.spotify.getPlaylistTracks(urlOrQuery, 50)
+        const videos: FormattedYoutubeVideo[] = []
+        for (let trackName of trackNames) {
+          videos.push(await fetchYoutubeVideoByQuery(trackName))
+        }
+        return videos
+      } else if (item.type === 'single') {
+        const trackName = await client.spotify.getTrackNameAndAuthor(urlOrQuery)
+        return fetchYoutubeVideoByQuery(trackName)
+      }
+    }
 
     return await fetchYoutubeVideoByQuery(urlOrQuery)
-  } catch (err) {
-    console.warn('Primary fetch failed. Query:', urlOrQuery, 'VideoId:', videoId)
-    console.error(err)
-
+  } catch (error) {
     try {
       return await fallback()
     } catch (fallbackErr) {
@@ -182,4 +214,44 @@ export const createYoutubeAudioStream = (url: string): Readable => {
   })
 
   return bufferedStream
+}
+
+const detectSource = (
+  input: string
+): {
+  source: 'spotify' | 'youtube' | 'query'
+  query?: string
+  type?: 'single' | 'playlist'
+  id?: string
+} => {
+  // YouTube video URL
+  const youtubeVideoRegex = /^https:\/\/(?:www\.)?(?:youtube\.com\/watch\?v=|youtu\.be\/)([a-zA-Z0-9_-]{11})(?:&.*)?$/
+  const videoMatch = input.match(youtubeVideoRegex)
+  if (videoMatch) {
+    return { source: 'youtube', id: videoMatch[1], type: 'single' }
+  }
+
+  // YouTube playlist URL
+  const youtubePlaylistRegex = /^https:\/\/(?:www\.)?youtube\.com\/playlist\?list=([a-zA-Z0-9_-]+)(?:&.*)?$/
+  const ytPlaylistMatch = input.match(youtubePlaylistRegex)
+  if (ytPlaylistMatch) {
+    return { source: 'youtube', id: ytPlaylistMatch[1], type: 'playlist' }
+  }
+
+  // Spotify track URL
+  const spotifyTrackRegex = /^https:\/\/open\.spotify\.com\/track\/([a-zA-Z0-9]+)(\?.*)?$/
+  const trackMatch = input.match(spotifyTrackRegex)
+  if (trackMatch) {
+    return { source: 'spotify', id: trackMatch[1], type: 'single' }
+  }
+
+  // Spotify playlist URL
+  const spotifyPlaylistRegex = /^https:\/\/open\.spotify\.com\/playlist\/([a-zA-Z0-9]+)(\?.*)?$/
+  const playlistMatch = input.match(spotifyPlaylistRegex)
+  if (playlistMatch) {
+    return { source: 'spotify', id: playlistMatch[1], type: 'playlist' }
+  }
+
+  // Default to query (treated as single)
+  return { source: 'query', query: input }
 }
