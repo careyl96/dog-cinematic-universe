@@ -115,3 +115,16 @@ export const removeFirstIntentWord = (sentence: string, intents: string[]) => {
 
   return words.join(' ')
 }
+
+export const formatFramedCommand = (command: string, totalWidth: number = 100) => {
+  const paddedCommand = ` ${command} `
+  const remaining = totalWidth - paddedCommand.length
+
+  const sideLength = Math.floor(remaining / 2)
+  const leftEquals = '='.repeat(sideLength)
+  const rightEquals = '='.repeat(totalWidth - sideLength - paddedCommand.length) // handles odd widths
+
+  const topBottom = '='.repeat(totalWidth)
+
+  return `${topBottom}\n${leftEquals}${paddedCommand}${rightEquals}\n${topBottom}`
+}

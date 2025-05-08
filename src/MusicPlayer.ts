@@ -419,24 +419,29 @@ export class YoutubeMusicPlayer {
   }
 
   async editNowPlayingEmbed(
-    state: NowPlayingEmbedState = this.nowPlayingEmbedInfo.state,
+    newState: NowPlayingEmbedState = this.nowPlayingEmbedInfo.state,
     skippedByUserId?: string,
     error?: any
   ) {
-    if (this.nowPlayingEmbedInfo.state === 'finished') return
-    if (this.nowPlayingEmbedInfo.state === 'skipped') return
+    if (newState !== 'loading' && this.nowPlayingEmbedInfo.state === 'finished') return
+    if (newState !== 'loading' && this.nowPlayingEmbedInfo.state === 'skipped') return
     if (this.nowPlayingEmbedInfo.state === 'error') return
     if (!this.nowPlayingEmbedInfo.message) return
 
     // console.log(`###### Track embed state: ${state}`)
-    this.nowPlayingEmbedInfo.state = state
-    if (
-      this.nowPlayingEmbedInfo.state === 'finished' ||
-      this.nowPlayingEmbedInfo.state === 'skipped' ||
-      this.nowPlayingEmbedInfo.state === 'error'
-    ) {
+    this.nowPlayingEmbedInfo.state = newState
+    if (newState === 'finished' || newState === 'skipped' || newState === 'error') {
       const skipReaction = this.nowPlayingEmbedInfo.message.reactions.cache.get('⏭️')
       if (skipReaction) skipReaction.users.remove(BOT_USER_ID).catch(console.error)
+
+      const repeatReaction = this.nowPlayingEmbedInfo.message.reactions.cache.get('🔁')
+      if (repeatReaction) {
+        repeatReaction.users.cache.forEach((user) => {
+          if (user.id !== BOT_USER_ID) {
+            repeatReaction.users.remove(user.id).catch(console.error)
+          }
+        })
+      }
     }
     await this.nowPlayingEmbedInfo.message
       ?.edit({
@@ -445,7 +450,7 @@ export class YoutubeMusicPlayer {
             youtubeVideo: this.nowPlayingEmbedInfo.video,
             userId: this.nowPlayingEmbedInfo.userId,
             upNext: this._queue[0],
-            state,
+            state: newState,
             skippedByUserId,
             error,
           }),

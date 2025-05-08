@@ -86,6 +86,7 @@ export const fetchYoutubeVideosFromUrlOrQuery = async ({
 
   // yts fallback
   const fallback = async () => {
+    // When query is a Youtube link, handle playlists or single videos
     if (item.source === 'youtube') {
       if (item.type === 'playlist') {
         return fetchPlaylistViaYts(urlOrQuery)
@@ -96,6 +97,7 @@ export const fetchYoutubeVideosFromUrlOrQuery = async ({
         })
       }
     }
+    // When query is a Spotify link, handle playlists or single tracks
     if (item.source === 'spotify') {
       if (item.type === 'playlist') {
         const trackNames = await client.spotify.getPlaylistTracks(urlOrQuery, 50)
@@ -115,10 +117,17 @@ export const fetchYoutubeVideosFromUrlOrQuery = async ({
         return fetchViaYTS({ query, isUrl: false })
       }
     }
+
+    // If query isn't a link, fetch via raw query
+    return await fetchViaYTS({ query: urlOrQuery, isUrl: false })
   }
 
   try {
-    if (useYts) return await fallback()
+    if (useYts) {
+      const video = await fallback()
+      console.log(video)
+      return video
+    }
 
     if (item.source === 'youtube') {
       if (item.type === 'playlist') {

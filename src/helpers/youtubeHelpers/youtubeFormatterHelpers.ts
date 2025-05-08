@@ -31,6 +31,7 @@ export const createYoutubeUrlFromId = (videoId: string) => {
 }
 
 export const formatDuration = (isoDuration: string) => {
+  if (!isoDuration) return null
   // Extract hours, minutes, and seconds using regex
   const match = isoDuration.match(/PT(?:(\d+)H)?(?:(\d+)M)?(?:(\d+)S)?/)
 
@@ -75,4 +76,3 @@ export const isValidYoutubeUrl = (url: string): boolean => {
 
   return regex.test(url)
 }
-

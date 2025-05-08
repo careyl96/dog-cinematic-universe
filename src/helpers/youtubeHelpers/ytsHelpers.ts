@@ -21,8 +21,8 @@ export const fetchViaYTS = async ({
 
   const response = await yts(query)
   if (!response?.all?.length) throw new Error('No search results found')
-
-  return formatYTSFromQuerySearch(response.all[0])
+  const videoResults = response.all.filter((result) => result.type === 'video' || result.type === 'live')
+  return formatYTSFromQuerySearch(videoResults[0])
 }
 
 export const fetchPlaylistViaYts = async (playlistUrl: string): Promise<FormattedYoutubeVideo[]> => {

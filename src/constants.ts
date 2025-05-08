@@ -55,6 +55,7 @@ export const COMMANDS = {
   MISC: ['clear'],
 }
 
+// animal crossing
 export const animalCrossingMusic: Record<number, string> = {
   0: 'https://youtube.com/watch?v=qDnrdeNDRio',
   1: 'https://youtube.com/watch?v=LjrMm_6zmNo',

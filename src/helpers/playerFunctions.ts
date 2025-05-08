@@ -10,6 +10,7 @@ import { shuffle } from './otherHelpers'
 import { createYoutubeUrlFromId, FormattedYoutubeVideo } from './youtubeHelpers/youtubeFormatterHelpers'
 import { getUserMusicHistory } from './musicDataHelpers'
 import { getRandomKeys } from '../commands/utility/roulette'
+import { formatFramedCommand } from './formatterHelpers'
 
 // play music using MusicPlayer
 export const play = async (options: {
@@ -28,6 +29,7 @@ export const play = async (options: {
     const isVoiceConnectionEstablished = await client.ensureVoiceConnection(user, interaction)
     if (!isVoiceConnectionEstablished) return
 
+    console.log(formatFramedCommand(`/play ${query}`))
     if (force) {
       await client.musicPlayer?.forcePlay({
         query,

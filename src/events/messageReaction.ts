@@ -7,6 +7,7 @@ import { formatDuration, FormattedYoutubeVideo } from '../helpers/youtubeHelpers
 import { removeFromQueue } from '../helpers/playerFunctions'
 
 // Raw instead of MessageReactionAdd/Remove because it doesn't work for cached messages
+// Handle embed music controls (message reactions)
 export default {
   name: Events.Raw,
   once: false,
