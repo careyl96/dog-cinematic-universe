@@ -1,4 +1,3 @@
-import fs from 'fs'
 import path from 'path'
 import {
   AudioPlayer,
@@ -10,19 +9,13 @@ import {
   NoSubscriberBehavior,
   VoiceConnection,
 } from '@discordjs/voice'
-import ffmpeg from 'fluent-ffmpeg'
 import { createYoutubeAudioStream } from './helpers/youtubeHelpers/youtubeHelpers'
 import { ChatInputCommandInteraction, Message, TextChannel } from 'discord.js'
 import { fetchYoutubeVideosFromUrlOrQuery } from './helpers/youtubeHelpers/youtubeHelpers'
 import { createQueueEmbed, createYoutubeEmbed, NowPlayingEmbedState } from './helpers/embedHelpers'
-import { BOT_USER_ID, PERCENTAGES, MAX_AUDIO_FILES, PATH } from './constants'
+import { BOT_USER_ID, PATH } from './constants'
 import { Readable } from 'stream'
-import {
-  toCompressedYoutubeVideo,
-  FormattedYoutubeVideo,
-  FormattedYoutubeVideoCompressed,
-  YoutubeCache,
-} from './helpers/youtubeHelpers/youtubeFormatterHelpers'
+import { FormattedYoutubeVideo } from './helpers/youtubeHelpers/youtubeFormatterHelpers'
 import { updateHistoryFile } from './helpers/musicDataHelpers'
 import { shuffle } from './helpers/otherHelpers'
 import {
@@ -32,7 +25,7 @@ import {
   parseISODurationToMs,
   roundPercentage,
 } from './helpers/formatterHelpers'
-import { getAudioFileFromCache } from './helpers/cacheHelpers'
+import { cacheAudioResource, getAudioFileFromCache } from './helpers/cacheHelpers'
 
 interface YoutubeMusicPlayerOptions {
   connection?: VoiceConnection
@@ -58,8 +51,7 @@ export type QueueItem = {
 export type CurrentlyPlaying = QueueItem & {
   elapsedInterval?: NodeJS.Timeout
   elapsedTime?: number
-  oldElapsedPercentage?: number
-  newElapsedPercentage?: number
+  elapsedPercentage?: number
   isPaused?: boolean
   latestUpdateId?: number
   isUpdating?: boolean
@@ -131,8 +123,7 @@ export class YoutubeMusicPlayer {
       roulette: false,
       elapsedInterval: null,
       elapsedTime: 0,
-      oldElapsedPercentage: null,
-      newElapsedPercentage: null,
+      elapsedPercentage: null,
       isPaused: null,
     }
 
@@ -211,6 +202,7 @@ export class YoutubeMusicPlayer {
         this._currentlyPlaying.isUpdating = false
 
         if (updateId !== this._currentlyPlaying.latestUpdateId) {
+          // setTimeout(..., 0) defers the next update to the next event loop tick
           setTimeout(() => this.tryUpdateEmbedTimer(), 0)
         }
       }
@@ -223,13 +215,8 @@ export class YoutubeMusicPlayer {
 
     this._currentlyPlaying.elapsedTime += 1000
 
-    const newPercentage = roundPercentage(this._currentlyPlaying.elapsedTime, duration)
-    const oldPercentage = this._currentlyPlaying.newElapsedPercentage
-
-    if (newPercentage !== oldPercentage) {
-      this._currentlyPlaying.oldElapsedPercentage = oldPercentage
-      this._currentlyPlaying.newElapsedPercentage = newPercentage
-    }
+    const newPercentage = roundPercentage(this._currentlyPlaying.elapsedTime, duration)    
+    this._currentlyPlaying.elapsedPercentage = newPercentage
 
     this.tryUpdateEmbedTimer()
   }
@@ -238,8 +225,7 @@ export class YoutubeMusicPlayer {
     clearInterval(this._currentlyPlaying.elapsedInterval)
     this._currentlyPlaying.elapsedTime = 0
     this._currentlyPlaying.elapsedInterval = null
-    this._currentlyPlaying.oldElapsedPercentage = null
-    this._currentlyPlaying.newElapsedPercentage = null
+    this._currentlyPlaying.elapsedPercentage = null
     this._currentlyPlaying.latestUpdateId = null
     this._currentlyPlaying.isUpdating = false
   }
@@ -324,7 +310,6 @@ export class YoutubeMusicPlayer {
     if (this.player.state.status === AudioPlayerStatus.Idle) {
       await this.playNextInQueue(interaction)
     } else {
-      // await this.editNowPlayingEmbedUpNext()
       await this.sendOrUpdateQueueEmbed()
 
       if (interaction && !interaction.replied) interaction.deleteReply()
@@ -380,7 +365,6 @@ export class YoutubeMusicPlayer {
             embeds: [
               createYoutubeEmbed({
                 ...embedInfo,
-                upNext: this._queue[0],
               }),
             ],
           })
@@ -418,7 +402,7 @@ export class YoutubeMusicPlayer {
       }
 
       if (typeof audioSource !== 'string') {
-        this.cacheAudioResource(audioSource as Readable, video)
+        cacheAudioResource(audioSource as Readable, video)
       }
     } catch (err) {
       console.error(err)
@@ -502,8 +486,6 @@ export class YoutubeMusicPlayer {
         })
         .catch((err: any) => console.error(err.message))
     }
-
-    // await this.editNowPlayingEmbedUpNext()
   }
 
   async deleteQueueEmbed() {
@@ -514,20 +496,12 @@ export class YoutubeMusicPlayer {
   async shuffle(userId: string) {
     if (this.queue.length >= 2) {
       this.queue = shuffle(this._queue)
-      // this._textChannel?.send({
-      //   allowedMentions: {
-      //     parse: [],
-      //   },
-      //   content: `<@${userId}> shuffled the queue!`,
-      // })
-      // await this.editNowPlayingEmbedUpNext()
       await this.sendOrUpdateQueueEmbed()
     }
   }
 
   async clearQueue() {
     this._queue = []
-    // await this.editNowPlayingEmbedUpNext()
     await this.sendOrUpdateQueueEmbed()
   }
 
@@ -681,7 +655,6 @@ export class YoutubeMusicPlayer {
           createYoutubeEmbed({
             ...this._nowPlayingEmbedInfo,
             state: state,
-            upNext: this._queue[0],
             skippedByUserId,
           }),
         ],
@@ -690,21 +663,6 @@ export class YoutubeMusicPlayer {
         console.error(err.message)
       })
     return state
-  }
-
-  async editNowPlayingEmbedUpNext() {
-    await this._nowPlayingEmbedInfo.message
-      ?.edit({
-        embeds: [
-          createYoutubeEmbed({
-            ...this._nowPlayingEmbedInfo,
-            upNext: this._queue[0],
-          }),
-        ],
-      })
-      .catch((err: any) => {
-        console.error(err.message)
-      })
   }
 
   async editNowPlayingEmbedProgress() {
@@ -721,7 +679,6 @@ export class YoutubeMusicPlayer {
         embeds: [
           createYoutubeEmbed({
             ...this._nowPlayingEmbedInfo,
-            upNext: this._queue[0],
           }),
         ],
       })
@@ -735,68 +692,6 @@ export class YoutubeMusicPlayer {
     // const cachedFilePath = getAudioFileFromCache(video.id)
     // const youtubeAudioStream = await createYoutubeAudioStream(video)
     return getAudioFileFromCache(video.id) || (await createYoutubeAudioStream(video))
-  }
-
-  private cacheAudioResource = async (stream: Readable, video: FormattedYoutubeVideo) => {
-    const tempPath = path.join(PATH.AUDIO_FILES.GENERATED.YOUTUBE.CACHE, `temp.ogg`)
-    const outputPath = path.join(PATH.AUDIO_FILES.GENERATED.YOUTUBE.CACHE, `${video.id}.ogg`)
-    const musicCacheJsonFilePath = path.join(PATH.AUDIO_FILES.GENERATED.YOUTUBE.DEFAULT, 'cache.json')
-    let musicCacheJson: YoutubeCache = {}
-
-    fs.mkdirSync(PATH.AUDIO_FILES.GENERATED.YOUTUBE.DEFAULT, { recursive: true })
-    if (fs.existsSync(musicCacheJsonFilePath)) {
-      musicCacheJson = JSON.parse(fs.readFileSync(musicCacheJsonFilePath, 'utf-8'))
-      if (musicCacheJson[video.id]) return
-    }
-
-    const addVideoDataToJSONCache = () => {
-      const cacheKeys = Object.keys(musicCacheJson)
-      if (!musicCacheJson[video.id] && cacheKeys.length >= MAX_AUDIO_FILES) {
-        const oldestKey = cacheKeys[0] // Insertion order is preserved
-
-        // delete .ogg from disk and evict from cache
-        fs.unlink(path.join(PATH.AUDIO_FILES.GENERATED.YOUTUBE.CACHE, `${oldestKey}.ogg`), (err) => {
-          if (err) {
-            console.error('error deleting file:', err)
-          } else {
-            delete musicCacheJson[oldestKey]
-            console.log(`evicted ${oldestKey}.ogg`)
-          }
-        })
-      }
-      const compressed = toCompressedYoutubeVideo(video)
-      musicCacheJson[video.id] = compressed
-
-      // NOTE: this writes the json file with human readable indentation (which occupies additional space)
-      // TODO: small optimization would be to remove spacing to save on space
-      fs.writeFileSync(musicCacheJsonFilePath, JSON.stringify(musicCacheJson, null, 2), 'utf-8')
-    }
-
-    const addVideoDataToAudioCache = () => {
-      fs.rename(tempPath, outputPath, (error) => {
-        if (error) {
-          // Show the error
-          console.error(error)
-        } else {
-          formatFramedCommand(`${video.id}.ogg saved to cache successfully`)
-        }
-      })
-    }
-
-    // save audio file
-    await new Promise<void>((resolve, reject) => {
-      ffmpeg(stream)
-        .audioCodec('copy')
-        .format('ogg')
-        .on('error', async (err: any) => {})
-        .on('end', () => {
-          addVideoDataToJSONCache()
-          addVideoDataToAudioCache()
-          // enforceFileLimit(PATH.AUDIO_FILES.GENERATED.YOUTUBE.CACHE)
-          resolve()
-        })
-        .save(tempPath)
-    })
   }
 
   updateMusicHistory(video: FormattedYoutubeVideo, userId: string) {

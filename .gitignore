@@ -9,6 +9,10 @@ audio_files/generated/pcm/*
 audio_files/generated/tts/*
 audio_files/generated/wav/*
 audio_files/generated/youtube/*
+!audio_files/generated/youtube/example_cache.json
+audio_files/generated/youtube/cache/*
+!audio_files/generated/youtube/cache/
+!audio_files/generated/youtube/cache/exampleItem.ogg
 chat_history/*
 user_data/*
 !user_data/example_user_folder

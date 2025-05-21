@@ -47,7 +47,6 @@ export const createErrorEmbed = (options: {
 type CreateYoutubeEmbedOptions = {
   video: FormattedYoutubeVideo
   userId: string
-  upNext?: any
   state?: NowPlayingEmbedState
   skippedByUserId?: string
   roulette?: boolean
@@ -57,14 +56,13 @@ type CreateYoutubeEmbedOptions = {
 export const createYoutubeEmbed = ({
   video,
   userId,
-  // upNext,
   state,
   skippedByUserId,
   roulette,
   error,
 }: CreateYoutubeEmbedOptions) => {
   let stateString = ''
-  const percentage = client.musicPlayer.currentlyPlaying?.newElapsedPercentage ?? 0
+  const percentage = client.musicPlayer.currentlyPlaying?.elapsedPercentage ?? 0
   const progressBar = generateProgressBar(percentage, 10)
   let color
 
@@ -140,20 +138,6 @@ export const createYoutubeEmbed = ({
     .setTimestamp()
 
   progressValue && embed.setDescription(progressValue)
-
-  // if (
-  //   upNext &&
-  //   (state === NowPlayingEmbedState.Loading ||
-  //     state === NowPlayingEmbedState.Playing ||
-  //     state === NowPlayingEmbedState.Paused)
-  // ) {
-  //   embed.addFields({
-  //     name: 'Up next:',
-  //     value: !!upNext
-  //       ? `[​\`${formatYoutubeVideoTitleForEmbed(upNext.video)}\`](<${upNext.video.url}>) <@${upNext.userId}>`
-  //       : '*Queue is empty!*',
-  //   })
-  // }
 
   return embed
 }

@@ -7,7 +7,8 @@ export interface FormattedYoutubeVideo {
   liveBroadcastContent?: 'live' | 'none'
 }
 
-export interface FormattedYoutubeVideoCompressed extends Pick<FormattedYoutubeVideo, 'title' | 'id' | 'duration' | 'liveBroadcastContent'> {}
+export interface FormattedYoutubeVideoCompressed
+  extends Pick<FormattedYoutubeVideo, 'title' | 'id' | 'duration' | 'liveBroadcastContent'> {}
 
 export const toCompressedYoutubeVideo = ({
   title,
