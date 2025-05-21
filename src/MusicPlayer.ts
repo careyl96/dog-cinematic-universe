@@ -753,7 +753,16 @@ export class YoutubeMusicPlayer {
       const cacheKeys = Object.keys(musicCacheJson)
       if (!musicCacheJson[video.id] && cacheKeys.length >= MAX_AUDIO_FILES) {
         const oldestKey = cacheKeys[0] // Insertion order is preserved
-        delete musicCacheJson[oldestKey]
+
+        // delete .ogg from disk and evict from cache
+        fs.unlink(path.join(PATH.AUDIO_FILES.GENERATED.YOUTUBE.CACHE, `${oldestKey}.ogg`), (err) => {
+          if (err) {
+            console.error('error deleting file:', err)
+          } else {
+            delete musicCacheJson[oldestKey]
+            console.log(`evicted ${oldestKey}.ogg`)
+          }
+        })
       }
       const compressed = toCompressedYoutubeVideo(video)
       musicCacheJson[video.id] = compressed
