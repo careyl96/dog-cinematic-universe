@@ -1,8 +1,6 @@
 import yts from 'yt-search'
-import youtubeDl from 'youtube-dl-exec'
-import axios from 'axios'
-import { Readable } from 'form-data'
 import { createYoutubeUrlFromId, FormattedYoutubeVideo, isValidYoutubeUrl } from './youtubeFormatterHelpers'
+import { timestampToISO } from '../formatterHelpers'
 
 // --- YT-Search helpers
 export const fetchViaYTS = async ({
@@ -21,8 +19,8 @@ export const fetchViaYTS = async ({
 
   const response = await yts(query)
   if (!response?.all?.length) throw new Error('No search results found')
-
-  return formatYTSFromQuerySearch(response.all[0])
+  const videoResults = response.all.filter((result) => result.type === 'video' || result.type === 'live')
+  return formatYTSFromQuerySearch(videoResults[0])
 }
 
 export const fetchPlaylistViaYts = async (playlistUrl: string): Promise<FormattedYoutubeVideo[]> => {
@@ -61,8 +59,11 @@ export const formatYTSFromIdSearch = (video: any): FormattedYoutubeVideo => {
   formattedVideo.title = video.title
   formattedVideo.url = video.url
   formattedVideo.id = video.videoId
-  formattedVideo.duration = video.duration.timestamp
+  formattedVideo.duration = timestampToISO(video.duration?.timestamp) || null
   formattedVideo.thumbnail = video.thumbnail
+
+  // to keep consistent with youtube api response
+  formattedVideo.liveBroadcastContent = 'none'
 
   return formattedVideo
 }
@@ -88,12 +89,15 @@ export const formatYTSFromQuerySearch = (video: any): FormattedYoutubeVideo => {
   // }
   const formattedVideo = {} as any
 
-  let liveVideo = video.type === 'live'
-  formattedVideo.title = liveVideo ? `🔴 LIVE 🔴 - ${video.title}` : video.title
+  // formattedVideo.title = liveVideo ? `🔴 LIVE 🔴 - ${video.title}` : video.title
+  formattedVideo.title = video.title
   formattedVideo.url = video.url || createYoutubeUrlFromId(video.videoId)
   formattedVideo.id = video.videoId
-  formattedVideo.duration = video.duration?.timestamp || ''
+  formattedVideo.duration = timestampToISO(video.duration?.timestamp) || null
   formattedVideo.thumbnail = video.thumbnail
+
+  // to keep consistent with youtube api response
+  formattedVideo.liveBroadcastContent = video.type === 'live' ? 'live' : 'none'
 
   return formattedVideo
 }

@@ -1,7 +1,4 @@
-import {
-  InteractionContextType,
-  SlashCommandBuilder,
-} from 'discord.js'
+import { InteractionContextType, SlashCommandBuilder } from 'discord.js'
 import { play } from '../../helpers/playerFunctions'
 
 export default {
@@ -10,17 +7,9 @@ export default {
     .setDescription('Queues/plays something from youtube')
     .setContexts(InteractionContextType.Guild)
     .addStringOption((option) =>
-      option
-        .setName('query')
-        .setDescription('YouTube link or search query')
-        .setRequired(true)
+      option.setName('query').setDescription('YouTube link or search query').setRequired(true)
     )
-    .addBooleanOption((option) =>
-      option
-        .setName('force')
-        .setDescription('Skip current song')
-        .setRequired(false)
-    ),
+    .addBooleanOption((option) => option.setName('force').setDescription('Skip current song').setRequired(false)),
   async execute(interaction: any) {
     const user = await interaction.guild!.members.fetch(interaction.user.id)
     const query = interaction.options.getString('query')!
@@ -30,6 +19,7 @@ export default {
       user,
       query,
       force,
+      saveToHistory: true,
       interaction,
     })
   },

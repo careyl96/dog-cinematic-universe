@@ -1,20 +1,16 @@
 import fs from 'fs'
 import youtubeDl from 'youtube-dl-exec'
 import ytdl from '@distube/ytdl-core'
-
 import axios from 'axios'
+
 import { Readable } from 'form-data'
 import { fetchPlaylistViaYts, fetchViaYTS } from './ytsHelpers'
-import {
-  extractYouTubeIdFromUrl,
-  FormattedYoutubeVideo,
-  formatYoutubeVideoFromIdSearch,
-  isValidYoutubeUrl,
-} from './youtubeFormatterHelpers'
+import { FormattedYoutubeVideo, formatYoutubeVideoFromIdSearch } from './youtubeFormatterHelpers'
 import { PassThrough } from 'stream'
 import { client } from '../..'
-import { createErrorEmbed, createYoutubeEmbed } from '../embedHelpers'
+import { createErrorEmbed } from '../embedHelpers'
 import { MessageFlags } from 'discord.js'
+import { getVideoDataFromCache } from '../cacheHelpers'
 
 // fetches single youtube video via youtube api and returns formatted video for music player using videoId
 const fetchYoutubeVideoById = async (videoId: string) => {
@@ -86,16 +82,22 @@ export const fetchYoutubeVideosFromUrlOrQuery = async ({
 
   // yts fallback
   const fallback = async () => {
+    // When query is a Youtube link, handle playlists or single videos
     if (item.source === 'youtube') {
       if (item.type === 'playlist') {
         return fetchPlaylistViaYts(urlOrQuery)
       } else if (item.type === 'single') {
-        return fetchViaYTS({
-          query: urlOrQuery,
-          isUrl: true,
-        })
+        const cachedVideo = getVideoDataFromCache(item.id)
+        return cachedVideo
+          ? cachedVideo
+          : await fetchViaYTS({
+              query: urlOrQuery,
+              isUrl: true,
+              videoId: item.id,
+            })
       }
     }
+    // When query is a Spotify link, handle playlists or single tracks
     if (item.source === 'spotify') {
       if (item.type === 'playlist') {
         const trackNames = await client.spotify.getPlaylistTracks(urlOrQuery, 50)
@@ -115,16 +117,23 @@ export const fetchYoutubeVideosFromUrlOrQuery = async ({
         return fetchViaYTS({ query, isUrl: false })
       }
     }
+
+    // If query isn't a link, fetch via raw query
+    return await fetchViaYTS({ query: urlOrQuery, isUrl: false })
   }
 
   try {
-    if (useYts) return await fallback()
+    if (useYts) {
+      const video = await fallback()
+      return video
+    }
 
     if (item.source === 'youtube') {
       if (item.type === 'playlist') {
         return await fetchYoutubePlaylistById(item.id)
       } else if (item.type === 'single') {
-        return await fetchYoutubeVideoById(item.id)
+        const cachedVideo = getVideoDataFromCache(item.id)
+        return cachedVideo ? cachedVideo : await fetchYoutubeVideoById(item.id)
       }
     }
 
@@ -180,7 +189,8 @@ export const createYoutubeAudioStreamYtdl = (url: string): Readable => {
 
 // // creates the audio stream necessary for discord's audio player
 // // using youtube-dl-exec
-export const createYoutubeAudioStream = (url: string): Readable => {
+export const createYoutubeAudioStream = (video: FormattedYoutubeVideo): Readable => {
+  const { url } = video
   if (!url) throw new Error('YouTube video URL is undefined (createYoutubeAudioStream)')
 
   const process = youtubeDl.exec(
@@ -201,19 +211,15 @@ export const createYoutubeAudioStream = (url: string): Readable => {
 
   const audioStream = process.stdout
 
+  // Return stream for bot audio streaming
   // Wrap the audio stream in a PassThrough to buffer and adjust the stream as needed
-  const bufferedStream = new PassThrough({
+  const passThrough = new PassThrough({
     highWaterMark: 128 * 1024, // Adjust buffer size to 128KB
   })
 
-  audioStream.pipe(bufferedStream)
+  audioStream.pipe(passThrough)
 
-  // Error handling for the stream
-  audioStream.on('error', (err) => {
-    console.error('Audio stream error:', err)
-  })
-
-  return bufferedStream
+  return passThrough
 }
 
 const detectSource = (

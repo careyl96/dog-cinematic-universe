@@ -43,14 +43,14 @@ export class SpotifyManager {
   }
 
   private extractTrackId(trackUrl: string): string | null {
-    const regex = /^https:\/\/open\.spotify\.com\/track\/([a-zA-Z0-9]+)$/
+    const regex = /^https:\/\/open\.spotify\.com\/track\/([a-zA-Z0-9]+)(\?.*)?$/
     const match = trackUrl.match(regex)
     return match ? match[1] : null
   }
-
   private extractPlaylistId(url: string): string | null {
-    const match = url.match(/playlist\/([a-zA-Z0-9]+)(\?|$)/)
-    return match ? match[1] : null
+    const regex = /^(https:\/\/open\.spotify\.com\/playlist\/([a-zA-Z0-9]+)|spotify:playlist:([a-zA-Z0-9]+))(\?.*)?$/
+    const match = url.match(regex)
+    return match ? match[2] || match[3] : null
   }
 
   public async getTrackNameAndAuthor(trackUrl: string): Promise<string> {

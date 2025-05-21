@@ -16,7 +16,7 @@ export const playHourlyMusic = async () => {
 
   if (trackUrl && channel) {
     if (!client.connection) return console.error('Dog not connected to voice channel')
-    await play({ user, query: trackUrl, triggeredByBot: true })
+    await play({ user, query: trackUrl, triggeredByBot: true, saveToHistory: false })
   } else {
     console.warn(`No track for hour ${hour} or channel missing`)
   }

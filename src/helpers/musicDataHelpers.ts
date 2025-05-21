@@ -4,8 +4,7 @@ import { BOT_USER_ID, PATH } from '../constants'
 import { FormattedYoutubeVideo } from './youtubeHelpers/youtubeFormatterHelpers'
 
 type MusicHistory = {
-  [videoId: string]: {
-    title: string
+  [videoId: string]: FormattedYoutubeVideo & {
     requestCount: number
   }
 }
@@ -23,6 +22,14 @@ export const getUserMusicHistory = (userId: string) => {
   }
 }
 
+export const getCachedTracks = () => {
+  const cacheJsonFilePath = path.join(PATH.AUDIO_FILES.GENERATED.YOUTUBE.DEFAULT, 'cache.json')
+
+  if (fs.existsSync(cacheJsonFilePath)) {
+    return JSON.parse(fs.readFileSync(cacheJsonFilePath, 'utf-8'))
+  }
+}
+
 export const createOrUpdateUserMusicHistory = (userId: string, data: MusicHistory) => {
   const dirPath = path.join(PATH.USER_DATA, userId)
   const filePath = path.join(dirPath, 'music_queue_history.json')
@@ -32,7 +39,7 @@ export const createOrUpdateUserMusicHistory = (userId: string, data: MusicHistor
 
   // Write the file
   fs.writeFileSync(filePath, JSON.stringify(data, null, 2), 'utf-8')
-  // console.log(`Music history created/updated for user: ${userId} at ${filePath}`)
+  // console.log(`Updated music history: ${userId} at ${filePath}`)
 }
 
 export const createOrUpdateUsersLikedMusic = (userId: string, data: LikedMusic | string) => {
@@ -109,13 +116,12 @@ export const updateHistoryFile = (filePath: string, video: FormattedYoutubeVideo
   }
 
   const videoId = video.id
-  if (!history[videoId]) {
-    history[videoId] = {
-      title: video.title,
-      requestCount: 1,
-    }
-  } else {
-    history[videoId].requestCount += 1
+  const prev = history[videoId]
+
+  history[videoId] = {
+    ...video,
+    ...prev,
+    requestCount: (prev?.requestCount ?? 0) + 1,
   }
 
   const userId = filePath.split('/').slice(-2, -1)[0] // Extract user ID from path

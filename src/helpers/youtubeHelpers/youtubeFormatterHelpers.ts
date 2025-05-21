@@ -4,18 +4,44 @@ export interface FormattedYoutubeVideo {
   id: string
   duration: string
   thumbnail: string
+  liveBroadcastContent?: 'live' | 'none'
+}
+
+export interface FormattedYoutubeVideoCompressed extends Pick<FormattedYoutubeVideo, 'title' | 'id' | 'duration' | 'liveBroadcastContent'> {}
+
+export const toCompressedYoutubeVideo = ({
+  title,
+  id,
+  duration,
+  liveBroadcastContent,
+}: FormattedYoutubeVideo): FormattedYoutubeVideoCompressed => ({
+  title: title,
+  id: id,
+  duration: duration,
+  ...(liveBroadcastContent ? { liveBroadcastContent: liveBroadcastContent } : {}),
+})
+
+export interface YoutubeCache {
+  [key: string]: FormattedYoutubeVideo | FormattedYoutubeVideoCompressed
 }
 
 export const formatYoutubeVideoFromIdSearch = (video: any): FormattedYoutubeVideo => {
+  // {
+  //   title: 'Initial D - Running in The 90s',
+  //   url: 'https://youtube.com/watch?v=XCiDuy4mrWU',
+  //   id: 'XCiDuy4mrWU',
+  //   duration: 'PT4M46S',
+  //   thumbnail: 'https://i.ytimg.com/vi/XCiDuy4mrWU/hqdefault.jpg',
+  //   liveBroadcastContent: 'none'
+  // }
   const formattedVideo = {} as any
-
-  let liveVideo = video.snippet.liveBroadcastContent === 'live'
-
-  formattedVideo.title = liveVideo ? `🔴 LIVE 🔴 - ${video.snippet.title}` : video.snippet.title
+  // formattedVideo.title = isLiveVideo ? `🔴 LIVE 🔴 - ${video.snippet.title}` : video.snippet.title
+  formattedVideo.title = video.snippet.title
   formattedVideo.url = `https://www.youtube.com/watch?v=${video.id}`
   formattedVideo.id = video.id
-  formattedVideo.duration = formatDuration(video.contentDetails.duration)
+  formattedVideo.duration = video.contentDetails.duration
   formattedVideo.thumbnail = video.snippet.thumbnails.default.url
+  formattedVideo.liveBroadcastContent = video.snippet.liveBroadcastContent
 
   return formattedVideo
 }
@@ -30,37 +56,19 @@ export const createYoutubeUrlFromId = (videoId: string) => {
   return `https://youtube.com/watch?v=${videoId}`
 }
 
-export const formatDuration = (isoDuration: string) => {
-  // Extract hours, minutes, and seconds using regex
-  const match = isoDuration.match(/PT(?:(\d+)H)?(?:(\d+)M)?(?:(\d+)S)?/)
-
-  if (!match) return ''
-
-  let hours = match[1] ? parseInt(match[1]) : 0
-  let minutes = match[2] ? parseInt(match[2]) : 0
-  let seconds = match[3] ? parseInt(match[3]) : 0
-
-  // Format time components with leading zeros where necessary
-  let formattedTime = [
-    hours > 0 ? hours : null, // Include hours only if it's greater than 0
-    hours > 0 || minutes > 9 ? minutes.toString().padStart(2, '0') : minutes, // Keep two digits for minutes if hours exist
-    seconds.toString().padStart(2, '0'), // Always keep two digits for seconds
-  ]
-    .filter((val) => val !== null)
-    .join(':') // Remove null values
-
-  return formattedTime
-}
-
 // takes the time from the title and returns the time formatted to ISO (e.g. 3:27 -> PT3M27S)
 export const parseTitleWithDurationToIso = (input: string) => {
-  const match = input.match(/\((\d+):(\d+)/)
+  const match = input.match(/\((\d{1,2}):(?:(\d{2}):)?(\d{2})\)/)
   if (!match) return null
 
-  const minutes = parseInt(match[1], 10)
-  const seconds = parseInt(match[2], 10)
+  const hasHours = !!match[2]
+
+  const hours = hasHours ? parseInt(match[1], 10) : 0
+  const minutes = hasHours ? parseInt(match[2], 10) : parseInt(match[1], 10)
+  const seconds = parseInt(match[3], 10)
 
   let iso = 'PT'
+  if (hours > 0) iso += `${hours}H`
   if (minutes > 0) iso += `${minutes}M`
   if (seconds > 0) iso += `${seconds}S`
 
@@ -75,4 +83,3 @@ export const isValidYoutubeUrl = (url: string): boolean => {
 
   return regex.test(url)
 }
-

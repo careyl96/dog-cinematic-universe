@@ -6,10 +6,6 @@ export default {
     .setDescription('Enables voice commands')
     .setContexts(InteractionContextType.Guild),
   async execute(interaction: any) {
-    interaction.client.setVoiceCommands(true)
-
-    await interaction.reply({
-      content: 'Voice commands enabled!',
-    })
+    await interaction.client.setVoiceCommands(true)
   },
 }

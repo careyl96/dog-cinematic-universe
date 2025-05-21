@@ -1,4 +1,5 @@
-import path from 'node:path'
+import path from 'path'
+import { NowPlayingEmbedState } from './helpers/embedHelpers'
 
 const __dirname = path.resolve()
 
@@ -9,7 +10,10 @@ export const PATH = {
       PCM: path.join(__dirname, 'audio_files/generated/pcm'),
       WAV: path.join(__dirname, 'audio_files/generated/wav'),
       TTS: path.join(__dirname, 'audio_files/generated/tts'),
-      YOUTUBE: path.join(__dirname, 'audio_files/generated/youtube'),
+      YOUTUBE: {
+        DEFAULT: path.join(__dirname, 'audio_files/generated/youtube'),
+        CACHE: path.join(__dirname, 'audio_files/generated/youtube/cache'),
+      },
     },
   },
   CHAT_HISTORY: path.join(__dirname, 'chat_history'),
@@ -43,10 +47,10 @@ export const PERMISSIONS = {}
 
 export const TRIGGER_WORDS = ['dog', 'yadog', 'dawn', 'dawg', 'doug', 'dogs', 'dodd', 'doc', 'dod', 'e-dog', 'yogg']
 
-export const TRIGGER_PHRASES = ['hey dog', 'hey doc', 'hey dawn', 'hey dawg', 'hey doug', 'you dog']
+export const TRIGGER_PHRASES = ['hey dog', 'hey dogs', 'he dog', 'he dogs', 'hey doc', 'hey dawn', 'hey dawg', 'hey doug', 'you dog']
 
 export const COMMANDS = {
-  PLAY: ['play', 'plays', 'place', 'plague', 'played', 'playing'],
+  PLAY: ['play', 'plays', 'place', 'plague', 'played', NowPlayingEmbedState.Playing],
   QUEUE: ['queue', 'q', 'cue', 'kyu', 'kiu', 'qiu'],
   STOP: ['stop', 'pause', 'paws'],
   RESUME: ['unpause', 'resume', 'continue'],
@@ -55,6 +59,7 @@ export const COMMANDS = {
   MISC: ['clear'],
 }
 
+// animal crossing
 export const animalCrossingMusic: Record<number, string> = {
   0: 'https://youtube.com/watch?v=qDnrdeNDRio',
   1: 'https://youtube.com/watch?v=LjrMm_6zmNo',
@@ -80,4 +85,53 @@ export const animalCrossingMusic: Record<number, string> = {
   21: 'https://youtube.com/watch?v=HxXOrY_DtVw',
   22: 'https://youtube.com/watch?v=zANebE1wNjw',
   23: 'https://youtube.com/watch?v=5hVFsARLcV0',
+}
+
+export const MAX_AUDIO_FILES = 50000
+
+export const PERCENTAGES = {
+  0: {
+    COLOR: 0xa0c980,
+    PROGRESS_BAR: '░░░░░░░░░░',
+  },
+  10: {
+    COLOR: 0x91be87,
+    PROGRESS_BAR: '█░░░░░░░░░',
+  },
+  20: {
+    COLOR: 0x8ebc88,
+    PROGRESS_BAR: '██░░░░░░░░',
+  },
+  30: {
+    COLOR: 0x7caf91,
+    PROGRESS_BAR: '███░░░░░░░',
+  },
+  40: {
+    COLOR: 0x6ba299,
+    PROGRESS_BAR: '████░░░░░░',
+  },
+  50: {
+    COLOR: 0x5995a2,
+    PROGRESS_BAR: '█████░░░░░',
+  },
+  60: {
+    COLOR: 0x4789aa,
+    PROGRESS_BAR: '██████░░░░',
+  },
+  70: {
+    COLOR: 0x357cb3,
+    PROGRESS_BAR: '███████░░░',
+  },
+  80: {
+    COLOR: 0x246fbb,
+    PROGRESS_BAR: '████████░░',
+  },
+  90: {
+    COLOR: 0x1262c4,
+    PROGRESS_BAR: '█████████░',
+  },
+  100: {
+    COLOR: 0x0055cc,
+    PROGRESS_BAR: '██████████',
+  },
 }
