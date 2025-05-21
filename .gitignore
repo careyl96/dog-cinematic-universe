@@ -2,6 +2,7 @@
 .DS_Store
 .vagrant/
 .vscode
+.direnv/
 
 /bin/*
 node_modules/
