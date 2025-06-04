@@ -1,8 +1,8 @@
 import { InteractionContextType, SlashCommandBuilder } from 'discord.js'
-import { queue, roulette } from '../../helpers/playerFunctions'
+import { queue } from '../../helpers/playerFunctions'
 import { createYoutubeUrlFromId } from '../../helpers/youtubeHelpers/youtubeFormatterHelpers'
-import { getCachedTracks, getUserMusicHistory } from '../../helpers/musicDataHelpers'
-import { getGuildMember } from '../../helpers/otherHelpers'
+import { getCachedTracks } from '../../helpers/musicDataHelpers'
+import { getGuildMember, getRandomKeys } from '../../helpers/otherHelpers'
 
 export default {
   data: new SlashCommandBuilder()
@@ -24,7 +24,7 @@ export default {
     })
 
     const cachedTracks = getCachedTracks()
-    let youtubeUrls = getRandomKeys(cachedTracks, count).map(
+    let youtubeUrls = getRandomKeys(cachedTracks).map(
       (videoId) => cachedTracks[videoId].url || createYoutubeUrlFromId(videoId)
     )
 
@@ -34,18 +34,4 @@ export default {
       saveToHistory: false,
     })
   },
-}
-
-export const getRandomKeys = (obj: Record<string, any>, n: number): string[] => {
-  // Get all keys of the object
-  const keys = Object.keys(obj)
-
-  // Shuffle the keys array using Fisher-Yates algorithm
-  for (let i = keys.length - 1; i > 0; i--) {
-    const j = Math.floor(Math.random() * (i + 1))
-    ;[keys[i], keys[j]] = [keys[j], keys[i]] // Swap the elements
-  }
-
-  // Return the first `n` keys from the shuffled array
-  return keys.slice(0, n)
 }

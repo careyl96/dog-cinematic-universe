@@ -133,7 +133,7 @@ export const formatFramedCommand = (command: string, totalWidth: number = 100) =
   const rightEquals = '='.repeat(Math.ceil(remaining / 2)) // handles odd spacing better
   const border = '='.repeat(totalWidth)
 
-  return `${border}\n${leftEquals}${paddedCommand}${rightEquals}\n${border}`
+  console.log(`${border}\n${leftEquals}${paddedCommand}${rightEquals}\n${border}`)
 }
 
 export const msToTimestamp = (ms: number): string => {
@@ -260,4 +260,21 @@ export const generateProgressBar = (percent: number, barLength = 10): string => 
   const empty = barLength - filled
 
   return `［ ${'￭'.repeat(filled)}${'･'.repeat(empty)} ］`
+}
+
+export const sanitizeFilename = (input: string): string => {
+  if (typeof input !== 'string') return ''
+
+  return input
+    .toLowerCase() // lowercase
+    .trim() // remove surrounding whitespace
+    .replace(/\s+/g, '-') // replace spaces (and tabs etc.) with hyphens
+    .replace(/[^a-z0-9-_]/g, '') // remove everything except a-z, 0-9, dash, underscore
+    .slice(0, 50) // optional: limit length to 50 chars
+}
+
+export const truncateText = (text: string, maxLength: number = 50, ellipsis: string = '...'): string => {
+  if (!text || maxLength <= 0) return ''
+  if (text.length <= maxLength) return text
+  return text.slice(0, maxLength - ellipsis.length) + ellipsis
 }

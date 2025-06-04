@@ -29,11 +29,6 @@ export const AUDIO_FILES = {
   ELEVATOR_MUSIC: path.join(PATH.AUDIO_FILES.DEFAULT, 'elevator_music.mp3'),
 }
 
-export const TEXT_CHANNELS = {
-  MUSIC_BOT: '541924016412426242',
-  GROQ_OUTPUT: '1364745947292106935',
-}
-
 export const EMOJIS = {
   AGREEGE: {
     name: 'Agreege',
@@ -47,7 +42,17 @@ export const PERMISSIONS = {}
 
 export const TRIGGER_WORDS = ['dog', 'yadog', 'dawn', 'dawg', 'doug', 'dogs', 'dodd', 'doc', 'dod', 'e-dog', 'yogg']
 
-export const TRIGGER_PHRASES = ['hey dog', 'hey dogs', 'he dog', 'he dogs', 'hey doc', 'hey dawn', 'hey dawg', 'hey doug', 'you dog']
+export const TRIGGER_PHRASES = [
+  'hey dog',
+  'hey dogs',
+  'he dog',
+  'he dogs',
+  'hey doc',
+  'hey dawn',
+  'hey dawg',
+  'hey doug',
+  'you dog',
+]
 
 export const COMMANDS = {
   PLAY: ['play', 'plays', 'place', 'plague', 'played', NowPlayingEmbedState.Playing],
@@ -89,49 +94,39 @@ export const animalCrossingMusic: Record<number, string> = {
 
 export const MAX_AUDIO_FILES = 50000
 
-export const PERCENTAGES = {
-  0: {
-    COLOR: 0xa0c980,
-    PROGRESS_BAR: '░░░░░░░░░░',
-  },
-  10: {
-    COLOR: 0x91be87,
-    PROGRESS_BAR: '█░░░░░░░░░',
-  },
-  20: {
-    COLOR: 0x8ebc88,
-    PROGRESS_BAR: '██░░░░░░░░',
-  },
-  30: {
-    COLOR: 0x7caf91,
-    PROGRESS_BAR: '███░░░░░░░',
-  },
-  40: {
-    COLOR: 0x6ba299,
-    PROGRESS_BAR: '████░░░░░░',
-  },
-  50: {
-    COLOR: 0x5995a2,
-    PROGRESS_BAR: '█████░░░░░',
-  },
-  60: {
-    COLOR: 0x4789aa,
-    PROGRESS_BAR: '██████░░░░',
-  },
-  70: {
-    COLOR: 0x357cb3,
-    PROGRESS_BAR: '███████░░░',
-  },
-  80: {
-    COLOR: 0x246fbb,
-    PROGRESS_BAR: '████████░░',
-  },
-  90: {
-    COLOR: 0x1262c4,
-    PROGRESS_BAR: '█████████░',
-  },
-  100: {
-    COLOR: 0x0055cc,
-    PROGRESS_BAR: '██████████',
-  },
+export const EMBED_CONTROLS = {
+  LIKE: 'like',
+  BLACKLIST: 'blacklist',
+  PLAY: 'play',
+  PAUSE: 'pause',
+  SKIP: 'skip',
+  STOP: 'stop',
+  QUEUE: 'queue',
+  VIEW_QUEUE: 'view_queue',
+  REPLAY: 'replay',
+  AUTOPLAY: 'autoplay',
+  ROULETTE: 'roulette',
+  BACK: 'back',
+  VOLUME_DOWN: 'volume_down',
+  VOLUME_UP: 'volume_up',
+  PLAYLIST: 'playlist',
+  // FORWARD: '⏩',
+  // VOLUME_UP: '🔊',
+  // VOLUME_DOWN: '🔉',
+  // VOLUME_MUTE: '🔇',
+  // VOLUME_UNMUTE: '🔈',
+}
+
+export const VOICE_CHANNEL_IDS = [
+  '1173363391046352926', // warriors in 3
+  '727282992958931066', // anti-social social room
+  '1059957383436185700', // content kingdom
+  '854513897180102657', // yes we still play runescape
+  '1022611880809877616', // building the cache
+  '1022611880809877616', // tfti
+]
+
+export const TEXT_CHANNELS = {
+  MUSIC_BOT: '541924016412426242',
+  GROQ_OUTPUT: '1364745947292106935',
 }

@@ -5,7 +5,6 @@ import { YoutubeMusicPlayer } from '../../MusicPlayer'
 const moveTrack = async (musicPlayer: YoutubeMusicPlayer, queue: any[], fromIndex: number, toIndex: number) => {
   const item = queue.splice(fromIndex, 1)[0]
   queue.splice(toIndex, 0, item)
-  await musicPlayer.sendOrUpdateQueueEmbed()
 }
 
 export default {
@@ -50,12 +49,11 @@ export default {
     const item = queue[position]
     await moveTrack(musicPlayer, queue, position, 0)
 
-    interaction.client.musicPlayer.sendOrUpdateQueueEmbed()
     await interaction.reply({
       embeds: [
         new EmbedBuilder()
           .setTitle('Updated track position:')
-          .setDescription(`[1] [${item.video.title}](${item.video.url})`),
+          .setDescription(`[${position + 1} → 1] [${item.video.title}](${item.video.url})`),
       ],
       flags: MessageFlags.Ephemeral,
     })

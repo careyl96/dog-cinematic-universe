@@ -3,7 +3,7 @@ import { InteractionContextType, SlashCommandBuilder } from 'discord.js'
 import { queue } from '../../helpers/playerFunctions'
 import { createYoutubeUrlFromId } from '../../helpers/youtubeHelpers/youtubeFormatterHelpers'
 import { getCachedTracks, getUserMusicHistory } from '../../helpers/musicDataHelpers'
-import { getGuildMember } from '../../helpers/otherHelpers'
+import { getGuildMember, getRandomKeys } from '../../helpers/otherHelpers'
 import { BOT_USER_ID, PATH } from '../../constants'
 import path from 'path'
 
@@ -31,10 +31,11 @@ export default {
     })
 
     const userMusicHistory = getUserMusicHistory(BOT_USER_ID)
-    let youtubeUrls = getRandomKeys(userMusicHistory, count)
+    let youtubeUrls = getRandomKeys(userMusicHistory)
       .filter((videoId) => !blacklist.includes(videoId))
       .filter((videoId) => !blacklist2.includes(videoId))
       .map((videoId) => userMusicHistory[videoId].url || createYoutubeUrlFromId(videoId))
+      .slice(0, count)
 
     await queue({
       user,
@@ -42,18 +43,4 @@ export default {
       saveToHistory: false,
     })
   },
-}
-
-export const getRandomKeys = (obj: Record<string, any>, n: number): string[] => {
-  // Get all keys of the object
-  const keys = Object.keys(obj)
-
-  // Shuffle the keys array using Fisher-Yates algorithm
-  for (let i = keys.length - 1; i > 0; i--) {
-    const j = Math.floor(Math.random() * (i + 1))
-    ;[keys[i], keys[j]] = [keys[j], keys[i]] // Swap the elements
-  }
-
-  // Return the first `n` keys from the shuffled array
-  return keys.slice(0, n)
 }

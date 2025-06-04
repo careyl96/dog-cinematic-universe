@@ -5,11 +5,13 @@ import {
   createYoutubeUrlFromId,
   FormattedYoutubeVideo,
   toCompressedYoutubeVideo,
+  uncompressYoutubeVideo,
   YoutubeCache,
 } from './youtubeHelpers/youtubeFormatterHelpers'
 import { formatFramedCommand } from './formatterHelpers'
 import { Readable } from 'stream'
 import ffmpeg from 'fluent-ffmpeg'
+import { createYoutubeAudioStream } from './youtubeHelpers/youtubeHelpers'
 
 export const cacheAudioResource = async (stream: Readable, video: FormattedYoutubeVideo) => {
   const tempPath = path.join(PATH.AUDIO_FILES.GENERATED.YOUTUBE.CACHE, `temp.ogg`)
@@ -42,7 +44,7 @@ export const cacheAudioResource = async (stream: Readable, video: FormattedYoutu
     musicCacheJson[video.id] = compressed
 
     // NOTE: this writes the json file with human readable indentation (which occupies additional space)
-    // TODO: small optimization would be to remove spacing to save on space
+    // small optimization would be to remove spacing to save on space
     fs.writeFileSync(musicCacheJsonFilePath, JSON.stringify(musicCacheJson, null, 2), 'utf-8')
   }
 
@@ -78,12 +80,7 @@ export const getVideoDataFromCache = (id: string): FormattedYoutubeVideo => {
     const cache: YoutubeCache = JSON.parse(fs.readFileSync(videoDataCacheJson, 'utf-8'))
     const cachedVideo = cache[id]
     if (cachedVideo) {
-      const video = {
-        ...cachedVideo,
-        url: createYoutubeUrlFromId(cachedVideo.id),
-        thumbnail: `https://i.ytimg.com/vi/${cachedVideo.id}/default.jpg`,
-        liveBroadcastContent: cachedVideo.liveBroadcastContent || 'none',
-      }
+      const video = uncompressYoutubeVideo(cachedVideo)
       return video as FormattedYoutubeVideo
     }
   }
@@ -93,4 +90,11 @@ export const getVideoDataFromCache = (id: string): FormattedYoutubeVideo => {
 export const getAudioFileFromCache = (id: string): string | null => {
   const audioFileCachePath = path.join(PATH.AUDIO_FILES.GENERATED.YOUTUBE.CACHE, `${id}.ogg`)
   return fs.existsSync(audioFileCachePath) ? audioFileCachePath : null
+}
+
+export const getAudioSource = async (video: FormattedYoutubeVideo) => {
+  // either returns an ogg file from cache or stream
+  // const cachedFilePath = getAudioFileFromCache(video.id)
+  // const youtubeAudioStream = await createYoutubeAudioStream(video)
+  return getAudioFileFromCache(video.id) || (await createYoutubeAudioStream(video))
 }

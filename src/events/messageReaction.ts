@@ -6,6 +6,7 @@ import { getVideoDataFromMessage, NowPlayingEmbedState } from '../helpers/embedH
 import { FormattedYoutubeVideo } from '../helpers/youtubeHelpers/youtubeFormatterHelpers'
 import { removeFromQueue } from '../helpers/playerFunctions'
 
+// UNUSED AS OF 5/21/2025
 // Raw instead of MessageReactionAdd/Remove because it doesn't work for cached messages
 // Handle embed music controls (message reactions)
 export default {
@@ -44,7 +45,7 @@ export default {
             client.musicPlayer.skip(userId)
           }
         }
-        createOrUpdateSongBlacklist(videoData.id)
+        createOrUpdateSongBlacklist({ data: videoData.id, videoData })
         return
       }
       if (packet.d.emoji.name === '⏭️') {
@@ -84,7 +85,6 @@ export default {
             })
           }
         } else {
-          console.log(videoData)
           client.musicPlayer.enqueue({
             videosToQueue: videoData,
             userId: userId,
@@ -102,7 +102,7 @@ export default {
         return
       }
       if (packet.d.emoji.name === '🚫') {
-        createOrUpdateSongBlacklist(videoData.id, true)
+        createOrUpdateSongBlacklist({ data: videoData.id, remove: true })
         return
       }
       if (packet.d.emoji.name === '🔁') {

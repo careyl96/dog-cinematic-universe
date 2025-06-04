@@ -1,4 +1,12 @@
-import { EmbedBuilder, InteractionReplyOptions, MessageCreateOptions, MessageFlags } from 'discord.js'
+import {
+  ActionRowBuilder,
+  ButtonBuilder,
+  ButtonStyle,
+  EmbedBuilder,
+  InteractionReplyOptions,
+  MessageCreateOptions,
+  MessageFlags,
+} from 'discord.js'
 import {
   extractYouTubeIdFromUrl,
   FormattedYoutubeVideo,
@@ -14,7 +22,7 @@ import {
   timestampToISO,
 } from './formatterHelpers'
 import { client } from '..'
-import { CurrentlyPlaying } from '../MusicPlayer'
+import { EMBED_CONTROLS } from '../constants'
 
 export enum NowPlayingEmbedState {
   Loading = 'loading',
@@ -50,6 +58,7 @@ type CreateYoutubeEmbedOptions = {
   state?: NowPlayingEmbedState
   skippedByUserId?: string
   roulette?: boolean
+  autoplay?: boolean
   error?: any
   percentage?: number
 }
@@ -62,7 +71,7 @@ export const createYoutubeEmbed = ({
   error,
 }: CreateYoutubeEmbedOptions) => {
   let stateString = ''
-  const percentage = client.musicPlayer.currentlyPlaying?.elapsedPercentage ?? 0
+  const percentage = client.musicPlayer.trackTimer?.elapsedPercentage ?? 0
   const progressBar = generateProgressBar(percentage, 10)
   let color
 
@@ -97,17 +106,16 @@ export const createYoutubeEmbed = ({
       break
   }
 
-  const currentlyPlaying = client.musicPlayer.currentlyPlaying
+  const trackTimer = client.musicPlayer.trackTimer
   let requestedByValue = `<@${userId}>${roulette ? ' via </roulette:1356769593208606791>' : ''}`
   let progressValue = ''
   if (state !== NowPlayingEmbedState.Finished) {
-    // progressValue = `${state === NowPlayingEmbedState.Playing ? `<a:dogcited:782004922408894505> ` : ''}\`${msToTimestamp(currentlyPlaying.elapsedTime)}\` ${progressBar} \`${isoToTimestamp(video.duration)}\``
-    progressValue = `\`${msToTimestamp(currentlyPlaying.elapsedTime)}\` ${progressBar} \`${isoToTimestamp(video.duration)}\``
+    progressValue = `\`${msToTimestamp(trackTimer.elapsedTime)}\` ${progressBar} \`${isoToTimestamp(video.duration)}\``
   }
 
   const fields = [
     {
-      name: '<:dentge:1194024284360814682> Requested by',
+      name: '<:SwoleDoge:778712353407238184> Requested by',
       value: requestedByValue,
       inline: true,
     },
@@ -128,7 +136,10 @@ export const createYoutubeEmbed = ({
 
   const embed = new EmbedBuilder()
     .setColor(color)
-    .setTitle(`${formatYoutubeVideoTitleForEmbed(video)} ${state === NowPlayingEmbedState.Playing ? `<a:dogcited:782004922408894505> ` : ''}`)
+    .setTitle(`${formatYoutubeVideoTitleForEmbed(video)}`)
+    // .setTitle(
+    //   `${formatYoutubeVideoTitleForEmbed(video)} ${state === NowPlayingEmbedState.Playing ? `<a:dogcited:782004922408894505> ` : ''}`
+    // )
     .setURL(video.url)
     .setAuthor({
       name: stateString,
@@ -139,7 +150,106 @@ export const createYoutubeEmbed = ({
 
   progressValue && embed.setDescription(progressValue)
 
-  return embed
+  const actionRows = createYoutubeEmbedActionRows(state)
+  return {
+    embeds: [embed],
+    components: [...actionRows],
+  }
+}
+
+export const createYoutubeEmbedActionRows = (state: NowPlayingEmbedState) => {
+  const actionRows: ActionRowBuilder<ButtonBuilder>[] = []
+  const row1Buttons: ButtonBuilder[] = []
+  const row2Buttons: ButtonBuilder[] = []
+
+  const trackFinished = [
+    NowPlayingEmbedState.Finished,
+    NowPlayingEmbedState.Skipped,
+    NowPlayingEmbedState.Error,
+  ].includes(state)
+
+  if (!trackFinished) {
+    const isPlaying = [NowPlayingEmbedState.Playing, NowPlayingEmbedState.Loading].includes(state)
+
+    row1Buttons.push(
+      new ButtonBuilder()
+        .setCustomId(EMBED_CONTROLS.VOLUME_DOWN)
+        .setLabel('Down')
+        .setEmoji('🔉')
+        .setStyle(ButtonStyle.Secondary)
+        .setDisabled(client.musicPlayer?.volume === 0.1 ? true : false),
+      new ButtonBuilder()
+        .setCustomId(EMBED_CONTROLS.BACK)
+        .setLabel('Back')
+        .setEmoji('⏪')
+        .setStyle(ButtonStyle.Secondary),
+      new ButtonBuilder()
+        .setCustomId(isPlaying ? EMBED_CONTROLS.PAUSE : 'play')
+        .setLabel(isPlaying ? 'Pause' : 'Play')
+        .setEmoji(isPlaying ? '⏸️' : '▶️')
+        .setStyle(ButtonStyle.Secondary),
+      new ButtonBuilder()
+        .setCustomId(EMBED_CONTROLS.SKIP)
+        .setLabel('Skip')
+        .setEmoji('⏭️')
+        .setStyle(ButtonStyle.Secondary),
+      new ButtonBuilder()
+        .setCustomId(EMBED_CONTROLS.VOLUME_UP)
+        .setLabel('Up')
+        .setEmoji('🔊')
+        .setStyle(ButtonStyle.Secondary)
+        .setDisabled(client.musicPlayer?.volume === 3 ? true : false)
+    )
+
+    row2Buttons.push(
+      new ButtonBuilder().setCustomId(EMBED_CONTROLS.LIKE).setEmoji('❤️').setStyle(ButtonStyle.Secondary),
+      new ButtonBuilder()
+        .setCustomId(EMBED_CONTROLS.VIEW_QUEUE)
+        .setLabel('Queue')
+        .setEmoji('📃')
+        .setStyle(ButtonStyle.Secondary),
+      new ButtonBuilder()
+        .setCustomId('playlist:list')
+        .setLabel('Playlists')
+        .setEmoji('🗂️')
+        .setStyle(ButtonStyle.Secondary),
+      new ButtonBuilder().setCustomId('playlist:add').setEmoji('✅').setStyle(ButtonStyle.Secondary),
+      new ButtonBuilder()
+        .setCustomId(EMBED_CONTROLS.AUTOPLAY)
+        .setLabel('Autoplay')
+        .setEmoji({ id: '1069843544375820328' })
+        .setStyle(client.musicPlayer.autoplay ? ButtonStyle.Primary : ButtonStyle.Secondary)
+    )
+
+    const topRow = new ActionRowBuilder<ButtonBuilder>().addComponents(...row1Buttons)
+    const bottomRow = new ActionRowBuilder<ButtonBuilder>().addComponents(...row2Buttons)
+
+    actionRows.push(topRow, bottomRow)
+  } else {
+    row1Buttons.push(
+      new ButtonBuilder().setCustomId(EMBED_CONTROLS.LIKE).setEmoji('❤️').setStyle(ButtonStyle.Secondary),
+      new ButtonBuilder()
+        .setCustomId('playlist:list')
+        .setLabel('Playlists')
+        .setEmoji('🗂️')
+        .setStyle(ButtonStyle.Secondary),
+      new ButtonBuilder()
+        .setCustomId(EMBED_CONTROLS.QUEUE)
+        .setLabel('Replay/Queue')
+        .setEmoji('🔁')
+        .setStyle(ButtonStyle.Secondary),
+      new ButtonBuilder()
+        .setCustomId('playlist:add')
+        .setLabel('Add to playlist')
+        .setEmoji('✅')
+        .setStyle(ButtonStyle.Secondary),
+      new ButtonBuilder().setCustomId(EMBED_CONTROLS.ROULETTE).setEmoji('❓').setStyle(ButtonStyle.Secondary)
+    )
+
+    actionRows.push(new ActionRowBuilder<ButtonBuilder>().addComponents(...row1Buttons))
+  }
+
+  return actionRows
 }
 
 export const createYoutubeErrorEmbed = (options: { youtubeVideo: any; userId: string; err: any }) => {
@@ -176,9 +286,20 @@ export const createRawEmbed = (message: string) => {
   return new EmbedBuilder().setDescription(message)
 }
 
-export const createLikedEmbed = (options: { text: string }) => {
-  const { text } = options
+export const createLikedEmbed = ({ text }: { text: string }) => {
   return new EmbedBuilder().setColor(0xff7f9f).setDescription(`### Liked songs: \n${text}`)
+}
+
+export const createCustomEmbed = ({
+  headerText,
+  text,
+  color = 0xff7f9f,
+}: {
+  headerText: string
+  text: string
+  color?: number
+}) => {
+  return new EmbedBuilder().setColor(color).setDescription(`### ${headerText}: \n${text}`)
 }
 
 export const getVideoDataFromMessage = (message: any): FormattedYoutubeVideo => {

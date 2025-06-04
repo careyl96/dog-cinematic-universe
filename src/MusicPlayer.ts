@@ -1,4 +1,4 @@
-import path from 'path'
+import path, { format } from 'path'
 import {
   AudioPlayer,
   AudioPlayerState,
@@ -17,7 +17,7 @@ import { BOT_USER_ID, PATH } from './constants'
 import { Readable } from 'stream'
 import { FormattedYoutubeVideo } from './helpers/youtubeHelpers/youtubeFormatterHelpers'
 import { updateHistoryFile } from './helpers/musicDataHelpers'
-import { shuffle } from './helpers/otherHelpers'
+import { getGuildMember, shuffle } from './helpers/otherHelpers'
 import {
   formatFramedCommand,
   getCurrentTimestamp,
@@ -25,7 +25,8 @@ import {
   parseISODurationToMs,
   roundPercentage,
 } from './helpers/formatterHelpers'
-import { cacheAudioResource, getAudioFileFromCache } from './helpers/cacheHelpers'
+import { cacheAudioResource, getAudioSource } from './helpers/cacheHelpers'
+import { getRandomVideo } from './helpers/playerFunctions'
 
 interface YoutubeMusicPlayerOptions {
   connection?: VoiceConnection
@@ -46,15 +47,18 @@ export type QueueItem = {
   userId: string
   saveToHistory: boolean
   roulette?: boolean
+  autoplay?: boolean
 }
 
-export type CurrentlyPlaying = QueueItem & {
-  elapsedInterval?: NodeJS.Timeout
-  elapsedTime?: number
-  elapsedPercentage?: number
-  isPaused?: boolean
-  latestUpdateId?: number
-  isUpdating?: boolean
+export type TrackTimer = {
+  elapsedTime?: number | null
+  elapsedTimerRunning?: boolean | null
+  elapsedPercentage?: number | null
+  startTimestamp?: number | null
+  baseElapsed?: number | null
+  latestUpdateId?: number | null
+  isUpdating?: boolean | null
+  nextExpectedTime?: number | null
 }
 
 interface ForcePlayOptions {
@@ -74,7 +78,7 @@ interface EnqueueOptions {
   interaction?: ChatInputCommandInteraction
 }
 
-interface NowPlayingEmbedInfo {
+export interface NowPlayingEmbedInfo {
   message: Message
   video: any
   userId: string
@@ -82,6 +86,7 @@ interface NowPlayingEmbedInfo {
   saveToHistory: boolean
   roulette?: boolean
   playNextInQueue?: boolean
+  skippedByUserId?: string
 }
 
 export class YoutubeMusicPlayer {
@@ -89,8 +94,12 @@ export class YoutubeMusicPlayer {
   private _textChannel: TextChannel
 
   public player: AudioPlayer
+  public autoplay: boolean = false
   private _queue: QueueItem[]
-  private _currentlyPlaying: CurrentlyPlaying
+  private _currentlyPlaying: QueueItem
+  private _volume: number = 0.5
+  private _audioResource: AudioResource | null = null
+  private _trackTimer: TrackTimer
 
   private _nowPlayingEmbedInfo: NowPlayingEmbedInfo = {
     message: null,
@@ -100,6 +109,7 @@ export class YoutubeMusicPlayer {
     saveToHistory: null,
     roulette: null,
     playNextInQueue: null,
+    skippedByUserId: null,
   }
   private queueEmbedInfo: any = {
     message: null,
@@ -116,15 +126,21 @@ export class YoutubeMusicPlayer {
       },
     })
     this._queue = []
-    this._currentlyPlaying = {
+    this.currentlyPlaying = {
       video: null,
       userId: null,
       saveToHistory: false,
       roulette: false,
-      elapsedInterval: null,
-      elapsedTime: 0,
+    }
+    this._trackTimer = {
+      elapsedTime: null,
+      elapsedTimerRunning: false,
       elapsedPercentage: null,
-      isPaused: null,
+      startTimestamp: 0,
+      baseElapsed: 0,
+      latestUpdateId: null,
+      isUpdating: false,
+      nextExpectedTime: null,
     }
 
     this.setupAudioPlayerEventListeners()
@@ -132,26 +148,17 @@ export class YoutubeMusicPlayer {
 
   private setupAudioPlayerEventListeners = () => {
     this.player.on('stateChange', async (oldPlayerState: AudioPlayerState, newPlayerState: AudioPlayerState) => {
-      await this.handleTrackInterval(newPlayerState)
-      console.log(`AudioPlayer state changed from ${oldPlayerState.status} to ${newPlayerState.status}`)
-
       if (newPlayerState.status === AudioPlayerStatus.Playing) {
+        await this.startElapsedTimer()
         await this.editNowPlayingEmbed({ state: NowPlayingEmbedState.Playing })
-
-        const skipReaction = this._nowPlayingEmbedInfo.message.reactions.cache.get('⏭️')
-        if (!skipReaction) {
-          const replayReaction = this._nowPlayingEmbedInfo.message.reactions.cache.get('🔁')
-          await replayReaction?.users.remove().catch(console.error)
-          await this._nowPlayingEmbedInfo.message.react('⏭️')
-          await this._nowPlayingEmbedInfo.message.react('🔁')
-        }
         console.log(
           `[${getCurrentTimestamp()}] 🎹 Now playing: ${this._currentlyPlaying?.video?.title} (id: ${this._currentlyPlaying?.video?.id})`
         )
       }
 
       if (newPlayerState.status === AudioPlayerStatus.Paused) {
-        await this.editNowPlayingEmbed({ state: NowPlayingEmbedState.Paused })
+        this.pauseElapsedTimer()
+        this.editNowPlayingEmbed({ state: NowPlayingEmbedState.Paused })
       }
       if (newPlayerState.status === AudioPlayerStatus.Idle) {
         await this.handleTrackFinished()
@@ -164,76 +171,115 @@ export class YoutubeMusicPlayer {
     })
   }
 
-  private handleTrackInterval = async (state: AudioPlayerState) => {
-    const currentlyPlaying = this.currentlyPlaying
-    const duration = parseISODurationToMs(this._nowPlayingEmbedInfo.video?.duration)
-    if (!duration) return
-
-    switch (state.status) {
-      case AudioPlayerStatus.Playing: {
-        this._currentlyPlaying.isPaused = false
-        if (!currentlyPlaying.elapsedInterval) {
-          this._currentlyPlaying.elapsedInterval = setInterval(() => this.updateElapsedTimer(), 1000)
-        }
-        break
-      }
-
-      case AudioPlayerStatus.Paused: {
-        this._currentlyPlaying.isPaused = true
-        break
-      }
-
-      case AudioPlayerStatus.Idle: {
-        this.clearAudioInterval()
-        break
-      }
-    }
+  async startElapsedTimer() {
+    if (this._trackTimer.elapsedTimerRunning) return
+    this._trackTimer.elapsedTimerRunning = true
+    this._trackTimer.latestUpdateId = 0
+    this._trackTimer.startTimestamp = Date.now()
+    this._trackTimer.baseElapsed ??= 0
+    await this.runElapsedTimerLoop()
   }
-  async tryUpdateEmbedTimer() {
-    const updateId = ++this._currentlyPlaying.latestUpdateId
 
-    if (!this._currentlyPlaying.isUpdating) {
-      this._currentlyPlaying.isUpdating = true
+  pauseElapsedTimer() {
+    if (!this._trackTimer.elapsedTimerRunning) return
+
+    const now = Date.now()
+    const delta = now - (this._trackTimer.startTimestamp ?? now)
+    this._trackTimer.baseElapsed += delta
+    this._trackTimer.elapsedTimerRunning = false
+    this._trackTimer.startTimestamp = null
+  }
+
+  getAccurateElapsedTime(): number {
+    const base = this._trackTimer.baseElapsed ?? 0
+    if (!this._trackTimer.elapsedTimerRunning || !this._trackTimer.startTimestamp) {
+      console.log(this._trackTimer.elapsedTimerRunning)
+      console.log(this._trackTimer.startTimestamp)
+      return base
+    }
+
+    return base + (Date.now() - this._trackTimer.startTimestamp)
+  }
+
+  runElapsedTimerLoop() {
+    const now = Date.now()
+    if (this.player.state.status === AudioPlayerStatus.Playing) {
+      const duration = parseISODurationToMs(this._nowPlayingEmbedInfo.video?.duration)
+      const accurateElapsed = this.getAccurateElapsedTime()
+
+      this._trackTimer.elapsedTime = accurateElapsed
+
+      const newPercentage = roundPercentage(accurateElapsed, duration)
+      this._trackTimer.elapsedPercentage = newPercentage
+
+      this.tryUpdateNowPlayingEmbedTimer()
+    }
+
+    // Update expected time for next tick
+    this._trackTimer.nextExpectedTime ??= now + 1000
+    this._trackTimer.nextExpectedTime += 1000
+
+    const delay = Math.max(0, this._trackTimer.nextExpectedTime - Date.now())
+    setTimeout(() => this.runElapsedTimerLoop(), delay)
+  }
+
+  async tryUpdateNowPlayingEmbedTimer() {
+    if (this.player.state.status !== AudioPlayerStatus.Playing) return
+    const updateId = ++this._trackTimer.latestUpdateId
+
+    if (!this._trackTimer.isUpdating) {
+      this._trackTimer.isUpdating = true
       try {
         await this.editNowPlayingEmbedProgress()
       } catch (err) {
         console.error('Embed update failed:', err)
       } finally {
-        this._currentlyPlaying.isUpdating = false
+        this._trackTimer.isUpdating = false
 
-        if (updateId !== this._currentlyPlaying.latestUpdateId) {
-          // setTimeout(..., 0) defers the next update to the next event loop tick
-          setTimeout(() => this.tryUpdateEmbedTimer(), 0)
+        if (updateId !== this._trackTimer.latestUpdateId) {
+          // Defer next update attempt
+          setTimeout(() => this.tryUpdateNowPlayingEmbedTimer(), 0)
         }
       }
     }
   }
 
-  updateElapsedTimer() {
-    if (this.currentlyPlaying?.isPaused) return
-    const duration = parseISODurationToMs(this._nowPlayingEmbedInfo.video?.duration)
+  async editNowPlayingEmbedProgress() {
+    if (
+      this.player.state.status !== AudioPlayerStatus.Playing ||
+      this._nowPlayingEmbedInfo.state === NowPlayingEmbedState.Finished ||
+      this._nowPlayingEmbedInfo.state === NowPlayingEmbedState.Skipped ||
+      this._nowPlayingEmbedInfo.state === NowPlayingEmbedState.Error
+    ) {
+      return
+    }
 
-    this._currentlyPlaying.elapsedTime += 1000
-
-    const newPercentage = roundPercentage(this._currentlyPlaying.elapsedTime, duration)    
-    this._currentlyPlaying.elapsedPercentage = newPercentage
-
-    this.tryUpdateEmbedTimer()
+    await this._nowPlayingEmbedInfo.message
+      ?.edit(
+        createYoutubeEmbed({
+          ...this._nowPlayingEmbedInfo,
+          state: NowPlayingEmbedState.Playing,
+        })
+      )
+      .catch((err: any) => {
+        console.error(err.message)
+      })
   }
 
   clearAudioInterval = () => {
-    clearInterval(this._currentlyPlaying.elapsedInterval)
-    this._currentlyPlaying.elapsedTime = 0
-    this._currentlyPlaying.elapsedInterval = null
-    this._currentlyPlaying.elapsedPercentage = null
-    this._currentlyPlaying.latestUpdateId = null
-    this._currentlyPlaying.isUpdating = false
+    this._trackTimer.elapsedTime = null
+    this._trackTimer.elapsedTimerRunning = false
+    this._trackTimer.elapsedPercentage = null
+    this._trackTimer.startTimestamp = null
+    this._trackTimer.baseElapsed = null
+    this._trackTimer.latestUpdateId = null
+    this._trackTimer.isUpdating = null
   }
 
   private subscribeToMusicPlayer(interaction?: any) {
     if (!this.connection) {
-      console.error('Dog is not in a voice channel.')
       if (interaction) throw new Error('Dog is not in a voice channel.')
+      return
     }
     if (this.connection?.state.status === 'ready' && this.connection?.state.subscription?.player === this.player) {
       // console.log('##### Already subscribed to the music player')
@@ -246,6 +292,7 @@ export class YoutubeMusicPlayer {
 
   setVoiceConnection(connection?: VoiceConnection) {
     this.connection = connection || null
+    this.subscribeToMusicPlayer()
   }
 
   // overrwrite currently playing song
@@ -310,15 +357,22 @@ export class YoutubeMusicPlayer {
     if (this.player.state.status === AudioPlayerStatus.Idle) {
       await this.playNextInQueue(interaction)
     } else {
-      await this.sendOrUpdateQueueEmbed()
-
       if (interaction && !interaction.replied) interaction.deleteReply()
     }
   }
 
   async playNextInQueue(interaction?: any) {
-    const queueItem = this._queue.shift()
-    if (!queueItem) return
+    let queueItem = this._queue.shift()
+    if (!queueItem) {
+      if (!this.autoplay) return
+
+      const video = await getRandomVideo()
+      queueItem = {
+        video,
+        userId: BOT_USER_ID,
+        saveToHistory: false,
+      }
+    }
 
     await this.playAudioFromYTVideo({
       video: queueItem.video,
@@ -342,6 +396,9 @@ export class YoutubeMusicPlayer {
     this.subscribeToMusicPlayer(interaction)
     try {
       this.clearAudioInterval()
+      if (!overrideCurrentEmbed) {
+        this.resetAudioVolume()
+      }
 
       if (interaction && !interaction.replied) interaction.deleteReply()
       // override current embed state
@@ -350,7 +407,7 @@ export class YoutubeMusicPlayer {
       if (overrideCurrentEmbed) {
         // override flag to enable the changing finished/skipped state in embed
         // when finished/skipped state is set on embed, it normally cannot be changed
-        await this.editNowPlayingEmbed({ state: NowPlayingEmbedState.Loading, override: true })
+        this.editNowPlayingEmbed({ state: NowPlayingEmbedState.Loading, override: true })
       } else {
         const embedInfo = {
           video,
@@ -360,16 +417,14 @@ export class YoutubeMusicPlayer {
         }
 
         // create a new embed every time play is called
-        await this._textChannel
-          ?.send({
-            embeds: [
-              createYoutubeEmbed({
-                ...embedInfo,
-              }),
-            ],
-          })
+        this._textChannel
+          ?.send(
+            createYoutubeEmbed({
+              ...embedInfo,
+            })
+          )
           .then(async (message) => {
-            this._nowPlayingEmbedInfo = {
+            this.nowPlayingEmbedInfo = {
               ...embedInfo,
               message,
               saveToHistory,
@@ -380,21 +435,15 @@ export class YoutubeMusicPlayer {
               userId,
               saveToHistory,
             }
-            await message.react('❤️')
-            await message.react('🚫')
-            await message.react('⏭️')
-            await message.react('🔁')
-            this.sendOrUpdateQueueEmbed()
           })
       }
       /* -------------------------------------------------------------- */
 
-      const audioSource = await this.getAudioSource(video)
+      const audioSource = await getAudioSource(video)
       const audioResource = createAudioResource(audioSource, {
         inlineVolume: true,
         silencePaddingFrames: 5,
       })
-
       this.playAudioResource(audioResource)
 
       if (typeof audioSource === 'string') {
@@ -410,82 +459,46 @@ export class YoutubeMusicPlayer {
     }
   }
 
+  private resetAudioVolume() {
+    this.volume = 0.5
+  }
+
   private playAudioResource = (audioResource: AudioResource) => {
+    this._audioResource = audioResource
     audioResource.volume?.setVolume(0.5)
+    this.volume = 0.5
     this.player.play(audioResource)
     // Set the flag back to true to resume normal queue behavior
     // (gets set to false in this.forcePlay to avoid audio player on idle event trigger, which plays the next track in the queue)
     this._nowPlayingEmbedInfo.playNextInQueue = true
   }
 
+  volDown = () => {
+    const newVolume = this.volume - 0.2 <= 0 ? 0.1 : (this.volume -= 0.2)
+    this._audioResource?.volume?.setVolume(newVolume)
+    this.volume = newVolume
+  }
+
+  volUp = () => {
+    const newVolume = this.volume + 0.2 >= 3 ? 3 : (this.volume += 0.2)
+    this._audioResource?.volume?.setVolume(newVolume)
+    this.volume = newVolume
+  }
+
   async handleTrackFinished() {
-    const { saveToHistory, playNextInQueue } = this._nowPlayingEmbedInfo
+    const { saveToHistory, playNextInQueue, skippedByUserId } = this._nowPlayingEmbedInfo
     const { video, userId } = this._currentlyPlaying
 
     if (saveToHistory) this.updateMusicHistory(video, userId)
-    await this.editNowPlayingEmbed({ state: NowPlayingEmbedState.Finished })
+
+    if (this._nowPlayingEmbedInfo.skippedByUserId) {
+      await this.editNowPlayingEmbed({ state: NowPlayingEmbedState.Skipped, skippedByUserId })
+    } else {
+      await this.editNowPlayingEmbed({ state: NowPlayingEmbedState.Finished })
+    }
     if (this.queueEmbedInfo.message) await this.deleteQueueEmbed()
-    // Remove embed if the bot is the one who played the song (hourly music ready.ts)
-    if (userId === BOT_USER_ID) {
-      this.nowPlayingEmbedInfo.message?.delete()
-    }
-
+    this.clearAudioInterval()
     if (playNextInQueue) await this.playNextInQueue()
-  }
-
-  async sendOrUpdateQueueEmbed() {
-    const numItemsToDisplay = 8
-    const queueItemText = this._queue
-      .slice(0, numItemsToDisplay)
-      .map(
-        (item, index) =>
-          `‎ [${index + 1}] ‎ [${item.video.title}](${item.video.url}) - (${isoToTimestamp(item.video.duration)}) <@${item.userId}>`
-      )
-      .join('\n')
-
-    let queueEmbedText =
-      this._queue.length > numItemsToDisplay
-        ? `${queueItemText}\n... and ${this._queue.length - numItemsToDisplay} more!`
-        : queueItemText
-
-    const latestMessages = await this._textChannel.messages.fetch({ limit: 2 })
-    const latestMessageWithEmbed = latestMessages.find((msg) => msg.embeds.length > 0)
-
-    // If no embed exists and queue has enough items, post new embed
-    if (!this.queueEmbedInfo.message && this._queue.length >= 1) {
-      await this._textChannel
-        ?.send({
-          embeds: [createQueueEmbed({ text: queueEmbedText })],
-        })
-        .then((message) => {
-          this.queueEmbedInfo.message = message
-        })
-    }
-    // If there's an embed and queue is too short, remove it
-    else if (this.queueEmbedInfo.message && this._queue.length < 1) {
-      await this.deleteQueueEmbed()
-      this.queueEmbedInfo.message = null
-    }
-    // If the embed is not the latest message with an embed, delete and repost it
-    else if (this.queueEmbedInfo.message && latestMessageWithEmbed?.id !== this.queueEmbedInfo.message.id) {
-      await this.deleteQueueEmbed()
-
-      await this._textChannel
-        ?.send({
-          embeds: [createQueueEmbed({ text: queueEmbedText })],
-        })
-        .then((message) => {
-          this.queueEmbedInfo.message = message
-        })
-    }
-    // Otherwise, just update the existing embed
-    else if (this.queueEmbedInfo.message) {
-      this.queueEmbedInfo.message
-        .edit({
-          embeds: [createQueueEmbed({ text: queueEmbedText })],
-        })
-        .catch((err: any) => console.error(err.message))
-    }
   }
 
   async deleteQueueEmbed() {
@@ -496,13 +509,11 @@ export class YoutubeMusicPlayer {
   async shuffle(userId: string) {
     if (this.queue.length >= 2) {
       this.queue = shuffle(this._queue)
-      await this.sendOrUpdateQueueEmbed()
     }
   }
 
   async clearQueue() {
     this._queue = []
-    await this.sendOrUpdateQueueEmbed()
   }
 
   async skip(userId: string) {
@@ -516,6 +527,7 @@ export class YoutubeMusicPlayer {
 
   async pause() {
     try {
+      if (this.player.state.status !== AudioPlayerStatus.Playing) return
       this.player.pause()
     } catch {
       throw new Error("Player isn't playing anything!")
@@ -534,41 +546,23 @@ export class YoutubeMusicPlayer {
   async stop({
     skip = false,
     skippedByUserId = null,
-    error = null,
   }: {
     skip?: boolean
     skippedByUserId?: string
-    playNextInQueue?: boolean
-    error?: any
   } = {}) {
-    let state: NowPlayingEmbedState = NowPlayingEmbedState.Finished
-
     try {
-      if (error) {
-        state = NowPlayingEmbedState.Error
-      }
-
       if (skip) {
+        this._nowPlayingEmbedInfo.skippedByUserId = skippedByUserId
         this._nowPlayingEmbedInfo.saveToHistory = false
-        state = NowPlayingEmbedState.Skipped
-        formatFramedCommand(`Track skipped by <@${skippedByUserId}>`)
+
+        formatFramedCommand(`Track skipped by @${skippedByUserId}`)
       }
 
-      // always call editNowPlayingEmbed before calling this.player.stop()
-      // if not, the audio player on idle event handler will trigger first
-      // the audio player event handler calls handleTrackFinished which also calls editNowPlayingEmbed
-      // this locks the embed state and makes it so we cannot set 'skipped' or 'error' states
-      await this.editNowPlayingEmbed({ state, skippedByUserId, error })
-
-      // Stop the player
-      this.player.stop()
-
-      // Delete the queue embed
+      this.player.stop(true)
       await this.deleteQueueEmbed()
     } catch (e) {
       console.error('Error occurred while stopping the track:', e)
 
-      // Fallback attempt to show error state in embed if initial embed update fails
       try {
         await this.editNowPlayingEmbed({
           state: NowPlayingEmbedState.Error,
@@ -598,14 +592,12 @@ export class YoutubeMusicPlayer {
     if (override) {
       this._nowPlayingEmbedInfo.state = state
       await this._nowPlayingEmbedInfo.message
-        ?.edit({
-          embeds: [
-            createYoutubeEmbed({
-              ...this._nowPlayingEmbedInfo,
-              state,
-            }),
-          ],
-        })
+        ?.edit(
+          createYoutubeEmbed({
+            ...this._nowPlayingEmbedInfo,
+            state,
+          })
+        )
         .catch((err: any) => {
           console.error(err.message)
         })
@@ -621,77 +613,39 @@ export class YoutubeMusicPlayer {
     }
     this._nowPlayingEmbedInfo.state = state
 
-    // On track finish, handle reactions (music controls)
-    if (
-      state === NowPlayingEmbedState.Finished ||
-      state === NowPlayingEmbedState.Skipped ||
-      state === NowPlayingEmbedState.Error
-    ) {
-      // When track is finished, remove the skip reaction
-      const skipReaction = this.nowPlayingEmbedInfo.message.reactions.cache.get('⏭️')
-      if (skipReaction) skipReaction.users.remove(BOT_USER_ID).catch(console.error)
-    }
-
-    // This block is basically only used when a user uses the repeat track function
-    if (state === NowPlayingEmbedState.Loading) {
-      const skipReaction = this.nowPlayingEmbedInfo.message.reactions.cache.get('⏭️')
-      if (skipReaction) {
-        skipReaction.users.cache.forEach((user) => {
-          if (user.id !== BOT_USER_ID) {
-            skipReaction.users.remove(user.id).catch(console.error)
-          }
-        })
-      }
-      try {
-        await this._nowPlayingEmbedInfo.message.react('⏭️')
-      } catch (err) {
-        console.error(err)
-      }
-    }
-
     await this._nowPlayingEmbedInfo.message
-      ?.edit({
-        embeds: [
-          createYoutubeEmbed({
-            ...this._nowPlayingEmbedInfo,
-            state: state,
-            skippedByUserId,
-          }),
-        ],
-      })
+      ?.edit(
+        createYoutubeEmbed({
+          ...this._nowPlayingEmbedInfo,
+          state: state,
+          skippedByUserId,
+        })
+      )
       .catch((err: any) => {
         console.error(err.message)
       })
     return state
   }
 
-  async editNowPlayingEmbedProgress() {
-    if (
-      this.player.state.status !== AudioPlayerStatus.Playing ||
-      this._nowPlayingEmbedInfo.state === NowPlayingEmbedState.Finished ||
-      this._nowPlayingEmbedInfo.state === NowPlayingEmbedState.Skipped ||
-      this._nowPlayingEmbedInfo.state === NowPlayingEmbedState.Error
-    )
+  async handleAutoplay(autoplay: boolean = this.autoplay) {
+    if (this.autoplay === autoplay) return
+    this.autoplay = autoplay
+    formatFramedCommand(`Autoplay is now ${autoplay ? 'enabled' : 'disabled'}`)
+
+    if (this.player.state.status === AudioPlayerStatus.Idle && this.autoplay) {
+      await this.playNextInQueue()
       return
+    }
 
     await this._nowPlayingEmbedInfo.message
-      ?.edit({
-        embeds: [
-          createYoutubeEmbed({
-            ...this._nowPlayingEmbedInfo,
-          }),
-        ],
-      })
+      ?.edit(
+        createYoutubeEmbed({
+          ...this._nowPlayingEmbedInfo,
+        })
+      )
       .catch((err: any) => {
         console.error(err.message)
       })
-  }
-
-  private getAudioSource = async (video: FormattedYoutubeVideo) => {
-    // either returns an ogg file from cache or stream
-    // const cachedFilePath = getAudioFileFromCache(video.id)
-    // const youtubeAudioStream = await createYoutubeAudioStream(video)
-    return getAudioFileFromCache(video.id) || (await createYoutubeAudioStream(video))
   }
 
   updateMusicHistory(video: FormattedYoutubeVideo, userId: string) {
@@ -717,32 +671,57 @@ export class YoutubeMusicPlayer {
   get currentlyPlaying() {
     return this._currentlyPlaying
   }
-  set currentlyPlaying({
-    video,
-    userId,
-    saveToHistory,
-    elapsedTime = 0,
-    elapsedInterval = null,
-    isPaused = true,
-    latestUpdateId = null,
-    isUpdating = false,
-  }: CurrentlyPlaying) {
+  set currentlyPlaying({ video, userId, saveToHistory }: QueueItem) {
     this._currentlyPlaying = {
       video,
       userId,
       saveToHistory,
+    }
+  }
+
+  get trackTimer() {
+    return this._trackTimer
+  }
+  set trackTimer({
+    elapsedTime = null,
+    elapsedTimerRunning = false,
+    elapsedPercentage = null,
+    startTimestamp = 0,
+    baseElapsed = 0,
+    latestUpdateId = null,
+    isUpdating = false,
+    nextExpectedTime = null,
+  }: TrackTimer) {
+    this._trackTimer = {
       elapsedTime,
-      elapsedInterval,
-      isPaused,
+      elapsedTimerRunning,
+      elapsedPercentage,
+      startTimestamp,
+      baseElapsed,
       latestUpdateId,
       isUpdating,
+      nextExpectedTime,
     }
   }
 
   get nowPlayingEmbedInfo() {
     return this._nowPlayingEmbedInfo
   }
-  set nowPlayingEmbedInfo({ message, video, userId, state, saveToHistory, roulette }: NowPlayingEmbedInfo) {
-    this._nowPlayingEmbedInfo = { message, video, userId, state, saveToHistory, roulette }
+  set nowPlayingEmbedInfo({
+    message,
+    video,
+    userId,
+    state,
+    saveToHistory,
+    roulette,
+    playNextInQueue = true,
+  }: NowPlayingEmbedInfo) {
+    this._nowPlayingEmbedInfo = { message, video, userId, state, saveToHistory, roulette, playNextInQueue }
+  }
+  get volume() {
+    return this._volume
+  }
+  set volume(volume: number) {
+    this._volume = volume
   }
 }

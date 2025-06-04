@@ -191,7 +191,7 @@ export const fetchModels = async () => {
     return models.data.data
   } catch (err: any) {
     console.error(err.message)
-    client.setVoiceCommands(false)
+    await client.setVoiceCommands(false)
   }
 }
 

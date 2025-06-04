@@ -9,7 +9,7 @@ type MusicHistory = {
   }
 }
 
-type LikedMusic = {
+export type LikedMusic = {
   [videoId: string]: FormattedYoutubeVideo
 }
 
@@ -42,7 +42,7 @@ export const createOrUpdateUserMusicHistory = (userId: string, data: MusicHistor
   // console.log(`Updated music history: ${userId} at ${filePath}`)
 }
 
-export const createOrUpdateUsersLikedMusic = (userId: string, data: LikedMusic | string) => {
+export const createOrUpdateUsersLikedMusic = (userId: string, data: LikedMusic | string, interaction?: any) => {
   const dirPath = path.join(PATH.USER_DATA, userId)
   const filePath = path.join(dirPath, 'liked_music.json')
 
@@ -64,20 +64,39 @@ export const createOrUpdateUsersLikedMusic = (userId: string, data: LikedMusic |
   // Merge new data into existing data (append/update)
   let updatedData: LikedMusic = { ...existingData }
 
+  let messageContent = ''
   if (typeof data === 'string') {
     delete updatedData[data]
+    messageContent = `Music removed from your liked music!`
   } else {
     updatedData = {
       ...updatedData,
       ...data,
     }
+    const [trackData] = Object.values(data)
+    messageContent = `Added [${trackData.title}](<${trackData.url}>) to your liked music!`
   }
 
   fs.writeFileSync(filePath, JSON.stringify(updatedData, null, 2), 'utf-8')
+  interaction &&
+    interaction.reply({
+      content: messageContent,
+      ephemeral: true,
+    })
   // console.log(`Users liked music created/updated for user: ${userId} at ${filePath}`)
 }
 
-export const createOrUpdateSongBlacklist = (data: string | string[], remove: boolean = false) => {
+export const createOrUpdateSongBlacklist = ({
+  data,
+  videoData,
+  remove = false,
+  interaction,
+}: {
+  data: string | string[]
+  videoData?: FormattedYoutubeVideo
+  remove?: boolean
+  interaction?: any
+}) => {
   const dirPath = path.join(PATH.USER_DATA, BOT_USER_ID)
   const filePath = path.join(dirPath, 'blacklisted_music.json')
 
@@ -97,15 +116,22 @@ export const createOrUpdateSongBlacklist = (data: string | string[], remove: boo
 
   const inputIds = Array.isArray(data) ? data : [data]
 
+  let messageContent
   let updatedData: string[]
   if (remove) {
     updatedData = existingData.filter((id) => !inputIds.includes(id))
   } else {
     const newSet = new Set([...existingData, ...inputIds])
     updatedData = Array.from(newSet)
+
+    const [trackData] = Object.values(data)
+    messageContent = `Blacklisted [${videoData.title}](<${videoData.url}>)`
   }
 
   fs.writeFileSync(filePath, JSON.stringify(updatedData, null, 2), 'utf-8')
+  interaction && interaction.reply({
+    content: messageContent,
+  })
 }
 
 export const updateHistoryFile = (filePath: string, video: FormattedYoutubeVideo) => {

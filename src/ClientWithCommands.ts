@@ -18,7 +18,15 @@ import {
 } from 'discord.js'
 import { createReadStream } from 'fs'
 import { Readable } from 'stream'
-import { COMMANDS, PATH, TEXT_CHANNELS, TRIGGER_PHRASES, TRIGGER_WORDS } from './constants'
+import {
+  BOT_USER_ID,
+  COMMANDS,
+  PATH,
+  TEXT_CHANNELS,
+  TRIGGER_PHRASES,
+  TRIGGER_WORDS,
+  VOICE_CHANNEL_IDS,
+} from './constants'
 import { play, stop, unpause, skip, roulette } from './helpers/playerFunctions'
 import { YoutubeMusicPlayer } from './MusicPlayer'
 import { clearAudioFolders } from './helpers/clearAudioFolders'
@@ -38,6 +46,7 @@ import {
 import { SpotifyManager } from './SpotifyManager'
 import path from 'path'
 import { findLastPhraseIndex } from './helpers/otherHelpers'
+import { PlaylistManager } from './PlaylistManager'
 
 interface ExtendedOptions extends ClientOptions {
   connection?: VoiceConnection
@@ -77,7 +86,6 @@ export class ClientWithCommands extends Client {
       },
     })
     this.temporaryPlayerQueue = []
-
     this.musicPlayer = null
     this.spotify = null
   }
@@ -93,7 +101,7 @@ export class ClientWithCommands extends Client {
   }
 
   subscribeToClientPlayer() {
-    if (!this.connection) throw new Error('Dog is not in a voice channel.')
+    if (!this.connection) return console.error('Dog is not in a voice channel.')
     if (this.connection?.state.status === 'ready' && this.connection?.state.subscription?.player === this.player) {
       // console.log('##### Already subscribed to the audio player')
     } else {
@@ -103,25 +111,24 @@ export class ClientWithCommands extends Client {
   }
 
   async joinVoiceChannel(voiceChannelId: string | undefined, interaction?: any, reconnect: boolean = false) {
-    if (this.voiceChannel?.id === voiceChannelId && !reconnect) {
-      return
-    }
+    if (!voiceChannelId) return
 
-    if (!voiceChannelId) {
-      return
-    }
+    // Avoid unnecessary joins
+    if (this.voiceChannel?.id === voiceChannelId && !reconnect) return
 
     try {
-      this.voiceChannel = (await this.channels.fetch(voiceChannelId)) as VoiceBasedChannel
-
-      if (!(this.voiceChannel instanceof VoiceChannel)) {
+      const channel = await this.channels.fetch(voiceChannelId)
+      if (!(channel instanceof VoiceChannel)) {
         throw new Error('Provided channel is not a voice channel.')
       }
 
+      this.voiceChannel = channel
+
+      this.connection?.destroy()
       this.connection = joinVoiceChannel({
-        channelId: this.voiceChannel.id,
-        guildId: this.voiceChannel.guild.id,
-        adapterCreator: this.voiceChannel.guild.voiceAdapterCreator,
+        channelId: channel.id,
+        guildId: channel.guild.id,
+        adapterCreator: channel.guild.voiceAdapterCreator,
         selfDeaf: !this.hasVoiceCommandsEnabled,
         selfMute: false,
       })
@@ -150,6 +157,7 @@ export class ClientWithCommands extends Client {
   ensureVoiceConnection = async (user: GuildMember, interaction?: any) => {
     const currentVoiceChannelId = user.voice?.channelId
     if (this.voiceChannel?.id !== currentVoiceChannelId) {
+      console.log('ensuring voice connection')
       await this.joinVoiceChannel(currentVoiceChannelId, interaction)
       if (!this.voiceChannel) {
         if (interaction) {
@@ -163,34 +171,23 @@ export class ClientWithCommands extends Client {
     return true
   }
 
-  async disconnect() {
+  async cleanup() {
     console.log('🧹💨✨ Disconnecting/cleaning up bot')
     this.voiceChannel = null
     try {
       this.connection?.destroy()
+      this.connection = null
     } catch (err) {}
 
     this.musicPlayer?.setVoiceConnection(null)
-    await this.musicPlayer?.clearQueue()
-    await this.musicPlayer?.stop()
   }
   async migrateToMostPopulatedVoiceChannelOrDisconnect() {
-    const voiceChannelIds = [
-      '1148443812016963584', // no poors allowed
-      '1173363391046352926', // give me content
-      '727282992958931066', // anti-social social room
-      '1059957383436185700', // 24 hrs of content
-      '854513897180102657', // yes we still play runescape
-      '1022611880809877616', // bot test realm
-      '1022611880809877616', // tfti
-    ]
-
     let channelWithMostUsers = null
     let channelWithMostUsersExcludingBot = null
     let maxUsers = 0
     let maxUsersExcludingBot = 0
 
-    for (const channelId of voiceChannelIds) {
+    for (const channelId of VOICE_CHANNEL_IDS) {
       try {
         const voiceChannel = (await this.channels.fetch(channelId)) as any
         if (!voiceChannel) continue
@@ -214,22 +211,22 @@ export class ClientWithCommands extends Client {
     }
 
     if (maxUsersExcludingBot > 0) {
-      return this.joinVoiceChannel(channelWithMostUsersExcludingBot)
+      await this.joinVoiceChannel(channelWithMostUsersExcludingBot)
+      return
     }
 
-    if (channelWithMostUsers) {
+    if (maxUsersExcludingBot === 0) {
+      await this.musicPlayer?.pause()
       setTimeout(async () => {
         try {
           const updatedChannel = (await this.channels.fetch(channelWithMostUsers)) as any
           if (updatedChannel?.members.size === 1) {
-            this.disconnect()
+            this.cleanup()
           }
         } catch (error) {
           console.error(`Error fetching channel ${channelWithMostUsers}:`, error)
         }
-      }, 60000)
-    } else {
-      this.disconnect()
+      }, 10 * 60_000)
     }
   }
 
@@ -312,7 +309,7 @@ export class ClientWithCommands extends Client {
       this.playAudioFromFilePath({ audioFilePath: path.join(PATH.AUDIO_FILES.DEFAULT, 'ba.mp3') })
     }
     this.hasVoiceCommandsEnabled = value
-    this.joinVoiceChannel(this.voiceChannel?.id, null, true)
+    await this.joinVoiceChannel(this.voiceChannel?.id, null, true)
   }
 
   async handleVoiceCommand(text: string, user: GuildMember) {

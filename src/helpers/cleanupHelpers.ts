@@ -68,25 +68,6 @@ export const purgeUnavailableTracks = async () => {
   fs.writeFileSync(filePath, JSON.stringify(existingData, null, 2), 'utf-8')
 }
 
-// old function to clean up bot reactions in music bot channel
-export const removeSkipReactionsFromBot = async (
-  channel: TextChannel,
-  botUserId: string,
-  limit: number = 100
-): Promise<void> => {
-  const messages: Message[] = await fetchMessages(channel, limit)
-
-  for (const message of messages) {
-    const reaction = message.reactions.cache.get('⏭️')
-    if (reaction) {
-      try {
-        await reaction.users.remove(botUserId)
-      } catch (err) {
-        console.error(`Failed to remove ⏭️ from message ${message.id}:`, err)
-      }
-    }
-  }
-}
 
 export const removeUncachedAudioFiles = () => {
   const jsonFilePath = path.join(PATH.AUDIO_FILES.GENERATED.YOUTUBE.DEFAULT, 'cache.json')

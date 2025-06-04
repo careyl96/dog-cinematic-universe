@@ -22,6 +22,15 @@ export const toCompressedYoutubeVideo = ({
   ...(liveBroadcastContent ? { liveBroadcastContent: liveBroadcastContent } : {}),
 })
 
+export const uncompressYoutubeVideo = (compressedYoutubeVideo: FormattedYoutubeVideoCompressed) => {
+  return {
+    ...compressedYoutubeVideo,
+    url: createYoutubeUrlFromId(compressedYoutubeVideo.id),
+    thumbnail: `https://i.ytimg.com/vi/${compressedYoutubeVideo.id}/default.jpg`,
+    liveBroadcastContent: compressedYoutubeVideo.liveBroadcastContent || 'none',
+  }
+}
+
 export interface YoutubeCache {
   [key: string]: FormattedYoutubeVideo | FormattedYoutubeVideoCompressed
 }

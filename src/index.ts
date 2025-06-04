@@ -2,14 +2,14 @@
 process.on('warning', (warning) => {})
 
 import dotenv from 'dotenv'
-import { Collection, Events, GatewayIntentBits, MessageFlags } from 'discord.js'
+import { Collection, GatewayIntentBits } from 'discord.js'
 import fs from 'node:fs'
 import path from 'path'
 import { ClientWithCommands } from './ClientWithCommands'
-import { PATH } from './constants'
-import { createErrorEmbed } from './helpers/embedHelpers'
+import { PlaylistManager } from './PlaylistManager'
 
 dotenv.config()
+const __dirname = path.resolve()
 
 // everything in this file is a slightly modified version of the discord bot initialization tutorial
 
@@ -26,7 +26,9 @@ export const client = new ClientWithCommands({
   commands: new Collection(),
 })
 
-const foldersPath = PATH.COMMANDS
+export const playlistManager = new PlaylistManager()
+
+const foldersPath = path.join(__dirname, 'src/commands')
 const commandFolders = fs.readdirSync(foldersPath)
 
 const setClientCommands = async () => {
@@ -48,7 +50,7 @@ const setClientCommands = async () => {
 setClientCommands()
 
 // get events
-const eventsPath = PATH.EVENTS
+const eventsPath = path.join(__dirname, 'src/events')
 const eventFiles = fs.readdirSync(eventsPath).filter((file) => file.endsWith('.ts'))
 
 const setEventListeners = async () => {
@@ -63,74 +65,6 @@ const setEventListeners = async () => {
   }
 }
 setEventListeners()
-
-client.on(Events.InteractionCreate, async (interaction) => {
-  if (!interaction.isChatInputCommand()) return
-
-  const interactionClient = interaction.client as ClientWithCommands
-  const command = interactionClient.commands.get(interaction.commandName)
-  if (!command) {
-    console.error(`No command matching ${interaction.commandName} was found.`)
-    return
-  }
-
-  try {
-    if (
-      interaction.commandName === 'tts' ||
-      interaction.commandName === 'play' ||
-      // temp
-      interaction.commandName === 'cache' ||
-      interaction.commandName === 'noncached' ||
-      // /temp
-      interaction.commandName === 'playprev' ||
-      interaction.commandName === 'groq'
-    ) {
-      await interaction.deferReply()
-    }
-
-    if (interaction.commandName === 'remove') {
-      await interaction.deferReply({
-        flags: MessageFlags.Ephemeral,
-      })
-    }
-
-    if (
-      interaction.commandName === 'stop' ||
-      interaction.commandName === 'skip' ||
-      interaction.commandName === 'shuffle' ||
-      interaction.commandName === 'pause' ||
-      interaction.commandName === 'roulette' ||
-      interaction.commandName === 'enablevoicecommands' ||
-      interaction.commandName === 'disablevoicecommands' ||
-      interaction.commandName === 'unpause'
-    ) {
-      await interaction.deferReply()
-      await interaction.deleteReply()
-    }
-
-    await command.execute(interaction)
-  } catch (error: any) {
-    let errorMessage = `${error?.message}` || 'Something went very wrong oopsie woopsie woof report to Carey'
-
-    if (interaction.replied || interaction.deferred) {
-      console.log('index.ts error:', error)
-      await interaction.followUp(
-        createErrorEmbed({
-          errorMessage: errorMessage,
-          flags: MessageFlags.Ephemeral,
-        }) as any
-      )
-    } else {
-      console.log('index.ts replied error:', error)
-      await interaction.reply(
-        createErrorEmbed({
-          errorMessage: errorMessage,
-          flags: MessageFlags.Ephemeral,
-        }) as any
-      )
-    }
-  }
-})
 
 // Log in to Discord with your client's token
 client.login(process.env.DISCORD_TOKEN)

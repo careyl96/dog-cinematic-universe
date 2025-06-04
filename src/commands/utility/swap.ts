@@ -4,7 +4,6 @@ import { YoutubeMusicPlayer } from '../../MusicPlayer'
 // Utility to swap two items in an array
 const swapTracks = async (musicPlayer: YoutubeMusicPlayer, queue: any[], indexA: number, indexB: number) => {
   ;[queue[indexA], queue[indexB]] = [queue[indexB], queue[indexA]]
-  await musicPlayer.sendOrUpdateQueueEmbed()
 }
 
 export default {

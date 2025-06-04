@@ -5,11 +5,10 @@ import { client } from '..'
 import { fetchYoutubeVideosFromUrlOrQuery } from './youtubeHelpers/youtubeHelpers'
 import { AudioPlayerStatus } from '@discordjs/voice'
 import { BOT_USER_ID, PATH } from '../constants'
-import { getGuildMember } from './otherHelpers'
+import { getGuildMember, getRandomKeys } from './otherHelpers'
 import { shuffle } from './otherHelpers'
 import { createYoutubeUrlFromId, FormattedYoutubeVideo } from './youtubeHelpers/youtubeFormatterHelpers'
 import { getUserMusicHistory } from './musicDataHelpers'
-import { getRandomKeys } from '../commands/utility/roulette'
 import { QueueItem } from '../MusicPlayer'
 
 type PlayOptions = {
@@ -126,7 +125,6 @@ export const removeFromQueue = async ({
     if (index !== -1) {
       client.musicPlayer.queue.splice(index, 1)
     }
-    client.musicPlayer.sendOrUpdateQueueEmbed()
     return interaction && interaction.deleteReply()
   }
 
@@ -135,8 +133,6 @@ export const removeFromQueue = async ({
   }
 
   const removedItems: QueueItem[] = client.musicPlayer.queue.splice(start - 1, end ? end - start + 1 : 1)
-
-  client.musicPlayer.sendOrUpdateQueueEmbed()
 
   if (interaction) {
     const reply = end
@@ -196,7 +192,7 @@ export const roulette = async ({
   const blacklist = JSON.parse(rawBlacklist)
 
   const userMusicHistory = getUserMusicHistory(userIdFilter || BOT_USER_ID)
-  let youtubeUrls = getRandomKeys(userMusicHistory, count + 10)
+  let youtubeUrls = getRandomKeys(userMusicHistory)
     .filter((videoId) => !blacklist.includes(videoId))
     .map((videoId) => userMusicHistory[videoId].url || createYoutubeUrlFromId(videoId))
 
@@ -208,4 +204,21 @@ export const roulette = async ({
     saveToHistory: false,
     roulette: true,
   })
+}
+
+export const getRandomVideo = async (): Promise<FormattedYoutubeVideo> => {
+  const rawBlacklist = fs.readFileSync(path.join(PATH.USER_DATA, `${BOT_USER_ID}/blacklisted_music.json`), 'utf-8')
+  const blacklist = JSON.parse(rawBlacklist)
+
+  const videoHistory = getUserMusicHistory(BOT_USER_ID)
+  let youtubeUrls = getRandomKeys(videoHistory)
+    .filter((videoId) => !blacklist.includes(videoId))
+    .map((videoId) => videoHistory[videoId].url || createYoutubeUrlFromId(videoId))
+
+  const url = shuffle([...new Set(youtubeUrls)])[0]
+  const video = (await fetchYoutubeVideosFromUrlOrQuery({
+    urlOrQuery: url,
+  })) as FormattedYoutubeVideo
+
+  return video
 }

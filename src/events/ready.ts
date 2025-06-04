@@ -8,8 +8,8 @@ import { client } from '..'
 import { fetchMessages } from '../helpers/otherHelpers'
 import { BOT_USER_ID, TEXT_CHANNELS } from '../constants'
 import { getVideoDataFromMessage } from '../helpers/embedHelpers'
-import { createOrUpdateUserMusicHistory, createOrUpdateUsersLikedMusic } from '../helpers/musicDataHelpers'
-import { cleanChannelMessages, purgeUnavailableTracks, removeUncachedAudioFiles } from '../helpers/cleanupHelpers'
+import { createOrUpdateUserMusicHistory } from '../helpers/musicDataHelpers'
+import { removeUncachedAudioFiles } from '../helpers/cleanupHelpers'
 
 export default {
   name: Events.ClientReady,
