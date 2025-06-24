@@ -1,5 +1,4 @@
 import path from 'path'
-import { NowPlayingEmbedState } from './helpers/embedHelpers'
 
 const __dirname = path.resolve()
 
@@ -55,7 +54,7 @@ export const TRIGGER_PHRASES = [
 ]
 
 export const COMMANDS = {
-  PLAY: ['play', 'plays', 'place', 'plague', 'played', NowPlayingEmbedState.Playing],
+  PLAY: ['play', 'plays', 'place', 'plague', 'played', 'playing'],
   QUEUE: ['queue', 'q', 'cue', 'kyu', 'kiu', 'qiu'],
   STOP: ['stop', 'pause', 'paws'],
   RESUME: ['unpause', 'resume', 'continue'],
@@ -109,13 +108,13 @@ export const EMBED_CONTROLS = {
   VOLUME_DOWN: 'volume_down',
   VOLUME_UP: 'volume_up',
   PLAYLIST: 'playlist',
-  // FORWARD: '⏩',
-  // VOLUME_UP: '🔊',
-  // VOLUME_DOWN: '🔉',
-  // VOLUME_MUTE: '🔇',
-  // VOLUME_UNMUTE: '🔈',
+  RETRY: 'retry',
 }
 
+export const UNDO = {
+  LIKE: 'undo_like',
+  QUEUE: 'undo_queue',
+}
 // export const VOICE_CHANNEL_IDS = [
 //   '1173363391046352926', // warriors in 3
 //   '727282992958931066', // anti-social social room

@@ -1,4 +1,4 @@
-import { FormattedYoutubeVideo } from './helpers/youtubeHelpers/youtubeHelpers'
+import { ExtendedTrack } from './EmbedManager'
 
 type UserStatePlaylist = {
   id: string | null
@@ -14,7 +14,7 @@ type UserStateQueueManager = {
 
 export class UserState {
   interaction: any | null = null
-  selectedVideo: FormattedYoutubeVideo | null = null
+  selectedVideo: ExtendedTrack | null = null
   selectedPlaylistIds: string[] | null = null
   private _playlist: UserStatePlaylist = {
     id: null as string | null,
@@ -27,6 +27,8 @@ export class UserState {
     collector: null as any,
   }
   textContent: string = ''
+  queuedTracks: ExtendedTrack[]
+  interactionWithId: any = {}
 
   constructor(initialState?: Partial<UserState>) {
     Object.assign(this, initialState)
@@ -35,11 +37,30 @@ export class UserState {
     if (initialState?.queueManager) this.queueManager = initialState.queueManager
   }
 
+  async clearInteraction(id?: string) {
+    if (this.interactionWithId[id]) {
+      try {
+        const interaction = this.interactionWithId[id]
+        await interaction.deleteReply()
+        delete this.interactionWithId[id]
+      } catch {
+        console.error('invalid interaction')
+      }
+    } else {
+      try {
+        await this.interaction.deleteReply()
+      } catch {
+        console.error('invalid interaction')
+      }
+    }
+  }
+
   cleanup() {
     this._playlist.collectors.forEach((collector) => {
       collector.stop()
     })
     this._queueManager.collector?.stop()
+    this.queuedTracks = []
   }
 
   get playlist() {

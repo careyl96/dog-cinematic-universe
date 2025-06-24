@@ -1,23 +1,19 @@
 import { Message, EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle } from 'discord.js'
 import { GuildSession } from './GuildSession'
 import { formatYoutubeVideoTitleForEmbed, NowPlayingEmbedState } from './helpers/embedHelpers'
-import {
-  generateProgressBar,
-  isoToTimestamp,
-  msToTimestamp,
-  isoToMs,
-} from './helpers/formatterHelpers'
+import { generateProgressBar, isoToTimestamp, msToTimestamp, isoToMs } from './helpers/formatterHelpers'
 import { Track } from './backend/entities/Track'
 import { handleTrackFinishedTransaction } from './backend/helpers/handleTrackFinishedTransaction'
 import { EMBED_CONTROLS } from './constants'
 import { uncompressTrack } from './helpers/youtubeHelpers/youtubeFormatterHelpers'
 import { TimerManager } from './TimerManager'
+
 export type ExtendedTrack = Track & {
   url: string
   thumbnail: string
 }
 
-export class EmbedStateManager {
+export class EmbedManager {
   session: GuildSession
   message: Message | null = null
 
@@ -39,9 +35,9 @@ export class EmbedStateManager {
     this.skippedByUserId = null
   }
 
-  public setTrack({ track, userId }: { track: Track; userId: string }) {
+  public setTrack({ track, userId }: { track: ExtendedTrack; userId: string }) {
     this.trackTimer.stop()
-    this.track = uncompressTrack(track)
+    this.track = track
     this.userId = userId
   }
 
@@ -131,7 +127,7 @@ export class EmbedStateManager {
       .setURL(track.url)
       .setAuthor({ name: stateString })
       .addFields(
-        { name: '<:Flowuwu:823463092724826162> Requested by', value: `<@${userId}>`, inline: true },
+        { name: '<:SwoleDoge:778712353407238184> Requested by', value: `<@${userId}>`, inline: true },
         { name: '🕗 Duration', value: track.duration ? `\`${trackDuration}\`` : '(Unknown)', inline: true }
       )
       .setThumbnail(track.thumbnail)
@@ -154,6 +150,8 @@ export class EmbedStateManager {
 
   public async updateEmbed(state: NowPlayingEmbedState = this.embedState, elapsedTime?: number) {
     if (!this.message) return console.error('No message to update')
+    if (this.embedState === NowPlayingEmbedState.Error && state !== NowPlayingEmbedState.Loading)
+      return console.error('Error already set')
 
     this.embedState = state
     const { embeds, components } = this.createTrackEmbed({ elapsedTime })
@@ -233,7 +231,7 @@ export class EmbedStateManager {
         new ButtonBuilder().setCustomId('playlist:add').setEmoji('✅').setStyle(ButtonStyle.Secondary),
         new ButtonBuilder()
           .setCustomId(EMBED_CONTROLS.AUTOPLAY)
-          .setLabel('Autoplay')
+          .setLabel('Auto')
           .setEmoji({ id: '1069843544375820328' })
           .setStyle(musicPlayer.autoplay ? ButtonStyle.Primary : ButtonStyle.Secondary)
       )
@@ -242,7 +240,7 @@ export class EmbedStateManager {
       const bottomRow = new ActionRowBuilder<ButtonBuilder>().addComponents(...row2Buttons)
 
       actionRows.push(topRow, bottomRow)
-    } else {
+    } else if (this.embedState !== NowPlayingEmbedState.Error) {
       // buttons that render when player has finished playing
       row1Buttons.push(
         new ButtonBuilder().setCustomId(EMBED_CONTROLS.LIKE).setEmoji('❤️').setStyle(ButtonStyle.Secondary),
@@ -261,7 +259,30 @@ export class EmbedStateManager {
           .setLabel('Add to playlist')
           .setEmoji('✅')
           .setStyle(ButtonStyle.Secondary),
-        new ButtonBuilder().setCustomId(EMBED_CONTROLS.ROULETTE).setEmoji('❓').setStyle(ButtonStyle.Secondary)
+        new ButtonBuilder()
+          .setCustomId(EMBED_CONTROLS.ROULETTE)
+          .setEmoji({ id: '1069843544375820328' })
+          .setStyle(ButtonStyle.Secondary)
+      )
+
+      actionRows.push(new ActionRowBuilder<ButtonBuilder>().addComponents(...row1Buttons))
+    } else {
+      // error case
+      row1Buttons.push(
+        new ButtonBuilder()
+          .setCustomId(EMBED_CONTROLS.RETRY)
+          .setLabel('Retry')
+          .setEmoji('🔁')
+          .setStyle(ButtonStyle.Secondary),
+        new ButtonBuilder()
+          .setCustomId('playlist:list')
+          .setLabel('Playlists')
+          .setEmoji('🗂️')
+          .setStyle(ButtonStyle.Secondary),
+        new ButtonBuilder()
+          .setCustomId(EMBED_CONTROLS.ROULETTE)
+          .setEmoji({ id: '1069843544375820328' })
+          .setStyle(ButtonStyle.Secondary)
       )
 
       actionRows.push(new ActionRowBuilder<ButtonBuilder>().addComponents(...row1Buttons))

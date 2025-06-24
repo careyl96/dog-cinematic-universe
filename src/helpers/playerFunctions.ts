@@ -1,19 +1,15 @@
 import { EmbedBuilder, MessageFlags } from 'discord.js'
-import { client } from '..'
-import { fetchYoutubeVideosFromUrlOrQuery, FormattedYoutubeVideo } from './youtubeHelpers/youtubeHelpers'
+import { fetchYoutubeVideosFromUrlOrQuery } from './youtubeHelpers/youtubeHelpers'
 import { AudioPlayerStatus } from '@discordjs/voice'
 import { pickRandomItemsFromList } from './otherHelpers'
-import { createYoutubeUrlFromId, UncompressedTrack, uncompressTrack } from './youtubeHelpers/youtubeFormatterHelpers'
 import { QueueItem } from '../MusicPlayer'
 import { trackCtrl } from '../backend/controllers/Controllers'
 import { GuildSession } from '../GuildSession'
-import { Track } from '../backend/entities/Track'
-import { ExtendedTrack } from '../EmbedStateManager'
+import { ExtendedTrack } from '../EmbedManager'
 
 type PlayOptions = {
   session?: GuildSession
   userId: string
-  guildId: string
   query: string
   force?: boolean
   triggeredByBot?: boolean
@@ -70,7 +66,6 @@ type QueueOptions = {
   userId: string
   query: string | string[]
   interaction?: any
-  saveToHistory: boolean
   roulette?: boolean
 }
 
@@ -124,29 +119,63 @@ export const removeFromQueue = async ({
   start = 1,
   end,
   videoId,
+  videoIds,
   interaction,
 }: {
   session: GuildSession
   start?: number
   end?: number
   videoId?: string
+  videoIds?: string[]
   interaction?: any
 }) => {
   try {
     if (!session || !session.musicPlayer) return
     const { musicPlayer } = session
 
+    const removedItems: QueueItem[] = []
+
+    // Remove by array of video IDs (in reverse, one per ID)
+    if (videoIds && videoIds.length > 0) {
+      for (const id of videoIds) {
+        for (let i = musicPlayer.queue.length - 1; i >= 0; i--) {
+          if (musicPlayer.queue[i].video.id === id) {
+            removedItems.push(...musicPlayer.queue.splice(i, 1))
+            break // Only remove the first (from end) occurrence
+          }
+        }
+      }
+
+      if (interaction) {
+        const reply = removedItems.length
+          ? removedItems.map((item) => `- [${item.video.title}](${item.video.url})`).join('\n')
+          : 'No matching items found.'
+        await interaction.followUp({
+          embeds: [new EmbedBuilder().setTitle('Removed items:').setDescription(reply)],
+          flags: MessageFlags.Ephemeral,
+        })
+      }
+
+      return
+    }
+
+    // Remove by single video ID (same logic: from end)
     if (videoId) {
-      const index = musicPlayer.queue.findIndex((item) => item.video.id === videoId)
-      if (index !== -1) musicPlayer.queue.splice(index, 1)
+      for (let i = musicPlayer.queue.length - 1; i >= 0; i--) {
+        if (musicPlayer.queue[i].video.id === videoId) {
+          removedItems.push(...musicPlayer.queue.splice(i, 1))
+          break
+        }
+      }
       return interaction?.deleteReply()
     }
 
+    // Remove by queue range
     if (!musicPlayer.queue || start < 1 || start > musicPlayer.queue.length) {
       return interaction?.deleteReply()
     }
 
-    const removedItems: QueueItem[] = musicPlayer.queue.splice(start - 1, end ? end - start + 1 : 1)
+    removedItems.push(...musicPlayer.queue.splice(start - 1, end ? end - start + 1 : 1))
 
     if (interaction) {
       const reply = removedItems.map((item) => `- [${item.video.title}](${item.video.url})`).join('\n')

@@ -4,6 +4,7 @@ import { BaseController } from './BaseController'
 import { UncompressedTrack, uncompressTrack } from '../../helpers/youtubeHelpers/youtubeFormatterHelpers'
 import { BOT_USER_ID } from '../../constants'
 import { FormattedYoutubeVideo } from '../../helpers/youtubeHelpers/youtubeHelpers'
+import { ExtendedTrack } from '../../EmbedManager'
 
 export class TrackController extends BaseController<Track> {
   constructor(manager?: EntityManager) {
@@ -27,7 +28,10 @@ export class TrackController extends BaseController<Track> {
     return this.repo.save(newTrack)
   }
 
-  async ensureTrackCompleteOrUpsert(trackData: Partial<Track | FormattedYoutubeVideo>, userId: string): Promise<Track> {
+  async ensureTrackCompleteOrUpsert(
+    trackData: UncompressedTrack | FormattedYoutubeVideo,
+    userId: string
+  ): Promise<ExtendedTrack> {
     if (!trackData.id) throw new Error('Track data must have an id')
 
     const track = await this.getById(trackData.id)
@@ -44,10 +48,11 @@ export class TrackController extends BaseController<Track> {
         updatedTrackData.firstPlayedBy = userId
       }
 
-      return this.upsert(updatedTrackData)
+      const upsertedTrack = await this.upsert(updatedTrackData)
+      return this.formatTrack(upsertedTrack)
     }
 
-    return track
+    return uncompressTrack(track)
   }
 
   getAll(): Promise<Track[]> {
@@ -66,7 +71,7 @@ export class TrackController extends BaseController<Track> {
     return this.repo.findOneBy({ id })
   }
 
-  async getByIds(ids: string[]): Promise<Track[]> {
+  async getByIds(ids: string[]): Promise<ExtendedTrack[]> {
     const tracks = await this.repo.findBy({
       id: In(ids),
     })
@@ -123,7 +128,7 @@ export class TrackController extends BaseController<Track> {
     return result.affected !== 0
   }
 
-  formatTrack(track: Track) {
+  formatTrack(track: Track): ExtendedTrack {
     if (!track || !track.title || !track.duration || !track.liveBroadcastContent) {
       return null
     }

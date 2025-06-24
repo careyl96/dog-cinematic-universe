@@ -25,7 +25,6 @@ export default {
       userId: stealth ? BOT_USER_ID : userId,
       query,
       force,
-      saveToHistory: true,
       interaction,
     })
   },

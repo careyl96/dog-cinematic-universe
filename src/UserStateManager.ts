@@ -1,6 +1,6 @@
 import { UserState } from './UserState'
 
-export class MenuManager {
+export class UserStateManager {
   private userStates: Map<string, UserState>
 
   constructor() {

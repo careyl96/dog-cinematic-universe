@@ -28,7 +28,7 @@ export default {
     const videoData: Track = extractVideoDataFromMessage(message)
     if (!videoData) return
 
-    const playerState: NowPlayingEmbedState = musicPlayer.embedStateManager.embedState
+    const playerState: NowPlayingEmbedState = musicPlayer.embedManager.embedState
     if (packet.t === 'MESSAGE_REACTION_ADD') {
       if (packet.d.emoji.name === '❤️') {
         const newFavorite = await playlistCtrl.addFavorite(userId, videoData.id)
@@ -36,7 +36,7 @@ export default {
         return
       }
       if (packet.d.emoji.name === '🚫') {
-        const currentlyPlaying = musicPlayer.embedStateManager.track
+        const currentlyPlaying = musicPlayer.embedManager.track
         if (videoData.title === currentlyPlaying?.title) {
           if (
             playerState === NowPlayingEmbedState.Playing ||
@@ -61,7 +61,7 @@ export default {
         return
       }
       if (packet.d.emoji.name === '🔁') {
-        const currentlyPlaying = musicPlayer.embedStateManager.track
+        const currentlyPlaying = musicPlayer.embedManager.track
         if (videoData.title === currentlyPlaying?.title) {
           musicPlayer.forcePlay({
             query: videoData.url,
@@ -69,7 +69,7 @@ export default {
             overrideCurrentEmbed: true,
           })
 
-          const replayReaction = musicPlayer.embedStateManager.message.reactions.cache.get('🔁')
+          const replayReaction = musicPlayer.embedManager.message.reactions.cache.get('🔁')
           if (replayReaction) {
             replayReaction.users.cache.forEach((user) => {
               if (user.id !== BOT_USER_ID) {
@@ -77,7 +77,7 @@ export default {
               }
             })
           }
-          const skipReaction = musicPlayer.embedStateManager.message.reactions.cache.get('⏭️')
+          const skipReaction = musicPlayer.embedManager.message.reactions.cache.get('⏭️')
           if (skipReaction) {
             skipReaction.users.cache.forEach((user) => {
               if (user.id !== BOT_USER_ID) {

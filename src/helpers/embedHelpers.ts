@@ -1,16 +1,17 @@
-import { EmbedBuilder, InteractionReplyOptions, MessageCreateOptions, MessageFlags } from 'discord.js'
-import { extractYouTubeIdFromUrl, parseTitleWithDurationToIso } from './youtubeHelpers/youtubeFormatterHelpers'
 import {
-  generateProgressBar,
-  isoToTimestamp,
-  msToTimestamp,
-  stripBackticks,
-  stripTimeFromTitle,
-  timestampToISO,
-} from './formatterHelpers'
-import { YoutubeMusicPlayer } from '../MusicPlayer'
+  ActionRowBuilder,
+  ButtonBuilder,
+  ButtonStyle,
+  EmbedBuilder,
+  InteractionReplyOptions,
+  MessageCreateOptions,
+  MessageFlags,
+} from 'discord.js'
+import { extractYouTubeIdFromUrl, parseTitleWithDurationToIso } from './youtubeHelpers/youtubeFormatterHelpers'
+import { stripBackticks, stripTimeFromTitle, timestampToISO } from './formatterHelpers'
 import { Track } from '../backend/entities/Track'
-import { ExtendedTrack } from '../EmbedStateManager'
+import { ExtendedTrack } from '../EmbedManager'
+import { UNDO } from '../constants'
 
 export enum NowPlayingEmbedState {
   Loading = 'loading',
@@ -92,6 +93,7 @@ export const extractVideoDataFromMessage = (message: any): ExtendedTrack => {
     title: stripTimeFromTitle(embedData.title),
     url: embedData?.url,
     id: extractYouTubeIdFromUrl(embedData?.url),
+    firstPlayedBy: embedData?.fields?.[2]?.value?.replace(/[<@!>]/g, ''),
     duration: isoDuration,
     thumbnail: embedData.thumbnail?.url,
   }
@@ -104,4 +106,12 @@ export const formatYoutubeVideoTitleForEmbed = (video: Track): string => {
   }
 
   return `${video.title}`
+}
+
+export const createUndoButtonRow = (customId: string) => {
+  const actionRowWithButton = new ActionRowBuilder<ButtonBuilder>().addComponents(
+    new ButtonBuilder().setCustomId(UNDO.QUEUE).setLabel('Undo').setEmoji('↩️').setStyle(ButtonStyle.Secondary)
+  )
+
+  return actionRowWithButton
 }

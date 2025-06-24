@@ -9,7 +9,6 @@ export default {
   async execute(client: ClientWithCommands, session: GuildSession, interaction: Interaction) {
     if (!interaction.isChatInputCommand()) return
 
-    console.log('slash command used', interaction.commandName)
     const command = client.commands.get(interaction.commandName)
     if (!command) {
       console.error(`No command matching ${interaction.commandName} was found.`)
@@ -19,6 +18,7 @@ export default {
     try {
       const deferEarly = [
         'play',
+        'remove',
         // 'tts',
         // 'groq',
       ]
@@ -35,10 +35,6 @@ export default {
       ]
 
       if (deferEarly.includes(interaction.commandName)) {
-        await interaction.deferReply({ flags: MessageFlags.Ephemeral })
-      }
-
-      if (interaction.commandName === 'remove') {
         await interaction.deferReply({ flags: MessageFlags.Ephemeral })
       }
 

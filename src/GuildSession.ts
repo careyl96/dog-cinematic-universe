@@ -11,7 +11,7 @@ import { client } from '.'
 import { Guild } from './backend/entities/Guild'
 import { getGuildMember } from './helpers/otherHelpers'
 import { getMostPopulatedVoiceChannels } from './helpers/voiceConnectionHelpers'
-import { MenuManager } from './MenuManager'
+import { UserStateManager } from './UserStateManager'
 
 interface GuildSessionOptions {
   guild: Guild
@@ -26,7 +26,7 @@ export class GuildSession {
   voiceChannel: VoiceBasedChannel | null
   connection: VoiceConnection | null
   musicPlayer: YoutubeMusicPlayer | null
-  userState: MenuManager | null
+  userState: UserStateManager | null
 
   private idleTimeout: NodeJS.Timeout | null = null
 
@@ -37,7 +37,7 @@ export class GuildSession {
 
     this.connection = connection ?? null
     this.musicPlayer = null
-    this.userState = new MenuManager()
+    this.userState = new UserStateManager()
 
     this.idleTimeout = null
   }

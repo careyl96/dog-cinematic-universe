@@ -13,7 +13,7 @@ import {
   TextInputStyle,
 } from 'discord.js'
 import { ClientWithCommands } from '../ClientWithCommands'
-import { createCustomEmbed } from '../helpers/embedHelpers'
+import { createCustomEmbed, createUndoButtonRow } from '../helpers/embedHelpers'
 import { escapeDiscordMarkdown, isoToTimestamp, timestampToISO, truncateText } from '../helpers/formatterHelpers'
 import { queue } from '../helpers/playerFunctions'
 import { extractYouTubeIdFromUrl, uncompressTrack } from '../helpers/youtubeHelpers/youtubeFormatterHelpers'
@@ -23,6 +23,10 @@ import { playlistCtrl, trackCtrl } from '../backend/controllers/Controllers'
 import { GuildSession } from '../GuildSession'
 import { ensureVoiceConnectionOrReply } from '../helpers/voiceConnectionHelpers'
 import { FormattedYoutubeVideo } from '../helpers/youtubeHelpers/youtubeHelpers'
+import { Track } from '../backend/entities/Track'
+import { ExtendedTrack } from '../EmbedManager'
+import { UNDO } from '../constants'
+import { AudioPlayerStatus } from '@discordjs/voice'
 
 const PLAYLIST = {
   MAIN_MENU: 'main_menu',
@@ -73,7 +77,7 @@ export default {
     const guildId = session.guild.id
     const musicPlayer = session.musicPlayer
 
-    let state = session.getUserState(userId)
+    const state = session.getUserState(userId)
     const userPlaylists = await playlistCtrl.getByUserId(userId)
     const publicPlaylists = await playlistCtrl.getPublicByGuildId(guildId)
 
@@ -274,7 +278,6 @@ export default {
                 (i.customId === PLAYLIST.ADD_TRACK_CONFIRM || i.customId === PLAYLIST.ADD_TRACK_PUBLIC_CONFIRM),
             })
             .on('collect', async (selectInteraction: any) => {
-              const state = session.getUserState(userId)
               const playlistId = selectInteraction.values[0]
               state.playlist.id = playlistId
 
@@ -305,21 +308,19 @@ export default {
           if (!connected) break
 
           const selectedTrackIds = state.playlist.selectedTracks
-          const selectedTracks = (await trackCtrl.getByIds(selectedTrackIds)) as any[]
+          const selectedTracks: ExtendedTrack[] = await trackCtrl.getByIds(selectedTrackIds)
 
-          await queue({
-            session,
-            userId,
-            query: selectedTrackIds,
-            saveToHistory: true,
-          })
+          const queueLengthBeforeQueuingTrack = musicPlayer.queue.length
+          const tracksToDisplay =
+            queueLengthBeforeQueuingTrack === 0 && musicPlayer.player.state.status === AudioPlayerStatus.Idle
+              ? selectedTracks.slice(1)
+              : selectedTracks
 
           if (selectedTracks && selectedTracks.length > 0) {
             const currentQueue = musicPlayer.queue
             const startIndex =
               currentQueue.length - selectedTracks.length < 0 ? 0 : currentQueue.length - selectedTracks.length
 
-            const tracksToDisplay = queue.length === 0 ? selectedTracks.slice(1) : selectedTracks
             const reply = tracksToDisplay
               .map((track, i) => {
                 const position = startIndex + i + 1
@@ -330,10 +331,12 @@ export default {
               })
               .join('\n')
 
-            await interaction.followUp({
-              embeds: [new EmbedBuilder().setColor(0xffa200).setTitle('Added to the queue:').setDescription(reply)],
-              flags: MessageFlags.Ephemeral,
-            })
+            if (reply) {
+              await interaction.followUp({
+                embeds: [new EmbedBuilder().setColor(0xffa200).setTitle('Added to queue:').setDescription(reply)],
+                flags: MessageFlags.Ephemeral,
+              })
+            }
           } else {
             await interaction.followUp({
               content: 'No tracks were added. Something went wrong.',
@@ -341,6 +344,11 @@ export default {
             })
           }
 
+          await queue({
+            session,
+            userId,
+            query: selectedTrackIds,
+          })
           break
         }
 
@@ -350,15 +358,23 @@ export default {
           const tracksToDelete = state.playlist.selectedTracks
 
           try {
-            const removedTracks = await playlistCtrl.removeTracks(parseInt(playlistId, 10), tracksToDelete)
+            const removedPlaylistTracks = await playlistCtrl.removeTracks(parseInt(playlistId, 10), tracksToDelete)
+            const removedTracks = removedPlaylistTracks.map((playlistTrack) => uncompressTrack(playlistTrack.track))
             state.playlist.selectedTracks = []
-            const deletedPlaylistEmbedText = removedTracks
-              .map((playlistTrack) => `- ${playlistTrack.track.title}`)
-              .join('\n')
-            await interaction.followUp({
-              embeds: [new EmbedBuilder().setTitle('Removed track(s)').setDescription(deletedPlaylistEmbedText)],
-              flags: MessageFlags.Ephemeral,
-            })
+
+            // const reply = removedTracks
+            //   .map((track, i) => {
+            //     return `[${i + 1}] [${truncateText(
+            //       escapeDiscordMarkdown(track.title),
+            //       45
+            //     )}](${track.url}) - (${isoToTimestamp(track.duration)}) `
+            //   })
+            //   .join('\n')
+
+            // await interaction.followUp({
+            //   embeds: [new EmbedBuilder().setTitle('Removed track(s):').setDescription(reply)],
+            //   flags: MessageFlags.Ephemeral,
+            // })
           } catch (error: any) {
             console.error('ERROR', error)
           }
@@ -504,17 +520,14 @@ export const renderPlaylistView = async ({
 
   const userId = interaction.user.id
   const state = session.getUserState(userId)
+  state.playlist = {
+    id: playlistId,
+    selectedTracks: [],
+    collectors: [],
+  }
   let playlist = await playlistCtrl.getById(parseInt(playlistId, 10))
 
-  let videos = playlist.tracks.map((playlistTrack: any) =>
-    uncompressTrack({
-      id: playlistTrack.track.id,
-      title: playlistTrack.track.title,
-      firstPlayedAt: playlistTrack.track.firstPlayedAt,
-      duration: playlistTrack.track.duration,
-      liveBroadcastContent: playlistTrack.track.liveBroadcastContent,
-    } as any)
-  ) as any[]
+  let videos = playlist.tracks.map((playlistTrack: any) => uncompressTrack(playlistTrack.track)) as any[]
 
   const backButton = new ButtonBuilder()
     .setCustomId(PLAYLIST.LIST_UPDATE)
@@ -590,6 +603,7 @@ export const renderPlaylistView = async ({
     componentType: ComponentType.StringSelect,
     filter: (i: any) => i.user.id === userId && i.customId === PLAYLIST.TRACK_SELECT,
   })
+  state.playlist.collectors.push(collector)
 
   collector.on('collect', async (selectInteraction: any) => {
     try {
@@ -640,7 +654,6 @@ export const renderPlaylistView = async ({
       }
 
       state.textContent = selectInteraction.message.content
-      state.playlist.id = playlistId
     } catch (error) {
       console.error('Error handling select menu collect event:', error)
       try {
@@ -653,30 +666,22 @@ export const renderPlaylistView = async ({
     componentType: ComponentType.Button,
     filter: (i: any) =>
       i.user.id === userId &&
-      [PLAYLIST.SELECTION_CLEAR, PLAYLIST.QUEUE_TRACK_CONFIRM, PLAYLIST.REMOVE_TRACK_CONFIRM].includes(i.customId),
+      [PLAYLIST.QUEUE_TRACK_CONFIRM, PLAYLIST.REMOVE_TRACK_CONFIRM, PLAYLIST.SELECTION_CLEAR].includes(i.customId),
   })
-
-  state.playlist = {
-    collectors: [collector, collector2],
-    id: playlistId,
-  }
+  state.playlist.collectors.push(collector2)
 
   collector2.on('collect', async (buttonInteraction: any) => {
     try {
       const session = client.guildSessions.get(buttonInteraction.guildId)
-      const connected = await ensureVoiceConnectionOrReply(buttonInteraction, session, userId, true)
-      if (!connected) return
+
+      if (buttonInteraction.customId === PLAYLIST.QUEUE_TRACK_CONFIRM) {
+        const connected = await ensureVoiceConnectionOrReply(buttonInteraction, session, userId, true)
+        if (!connected) return
+      }
 
       playlist = await playlistCtrl.getById(parseInt(state.playlist.id, 10))
 
-      const updatedVideos = playlist.tracks.map((playlistTrack) =>
-        uncompressTrack({
-          id: playlistTrack.track.id,
-          title: playlistTrack.track.title,
-          duration: playlistTrack.track.duration,
-          liveBroadcastContent: playlistTrack.track.liveBroadcastContent,
-        })
-      )
+      const updatedVideos = playlist.tracks.map((playlistTrack) => uncompressTrack(playlistTrack.track))
 
       if (updatedVideos.length === 0) {
         const navRow = new ActionRowBuilder<ButtonBuilder>().addComponents(backButton)
@@ -702,7 +707,7 @@ export const renderPlaylistView = async ({
         .map((video, i) => {
           const title = truncateText(escapeDiscordMarkdown(video.title), 45)
           const isNew = newVideo && video.id === newVideo.id
-          return `[${i + 1}] [${title}](${video.url})${isNew ? ' ⭐️ [NEW]' : ''}`
+          return `[${i + 1}] [${title}](${video.url}) - (${isoToTimestamp(video.duration)})${isNew ? ' ⭐️ [NEW]' : ''}`
         })
         .join('\n')
 

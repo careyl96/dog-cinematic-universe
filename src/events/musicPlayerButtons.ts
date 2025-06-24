@@ -10,7 +10,7 @@ import {
 } from 'discord.js'
 import { ClientWithCommands } from '../ClientWithCommands'
 import { createQueueEmbed, extractVideoDataFromMessage } from '../helpers/embedHelpers'
-import { EMBED_CONTROLS } from '../constants'
+import { EMBED_CONTROLS, UNDO } from '../constants'
 import { escapeDiscordMarkdown, isoToTimestamp, truncateText } from '../helpers/formatterHelpers'
 import { fetchMessages } from '../helpers/otherHelpers'
 import { extractYouTubeIdFromUrl } from '../helpers/youtubeHelpers/youtubeFormatterHelpers'
@@ -19,7 +19,7 @@ import { playlistCtrl, trackCtrl } from '../backend/controllers/Controllers'
 import { AudioPlayerStatus } from '@discordjs/voice'
 import { GuildSession } from '../GuildSession'
 import { ensureVoiceConnectionOrReply } from '../helpers/voiceConnectionHelpers'
-import { ExtendedTrack } from '../EmbedStateManager'
+import { ExtendedTrack } from '../EmbedManager'
 
 export default {
   name: Events.InteractionCreate,
@@ -30,13 +30,14 @@ export default {
 
     const userId = interaction.user.id
     const message = interaction.message
+    const userState = session.getUserState(userId)
 
     const musicPlayer = session.musicPlayer
 
     const videoData: ExtendedTrack = extractVideoDataFromMessage(message)
     if (!videoData) return
 
-    const embedState = musicPlayer.embedStateManager
+    const embedState = musicPlayer.embedManager
     const playerState: AudioPlayerStatus = musicPlayer.player.state.status
 
     switch (interaction.customId) {
@@ -50,7 +51,7 @@ export default {
         await interaction.deferUpdate()
         break
 
-      case EMBED_CONTROLS.BACK:
+      case EMBED_CONTROLS.BACK: {
         await interaction.deferUpdate()
         const connected = await ensureVoiceConnectionOrReply(interaction, session, userId)
         if (!connected) break
@@ -84,15 +85,16 @@ export default {
             const embedData = prevMessage.embeds[0].data
             const prevVideo = (await trackCtrl.getByIdAndFormat(extractYouTubeIdFromUrl(embedData.url))) as any
 
-            musicPlayer.embedStateManager.message = prevMessage
+            musicPlayer.embedManager.message = prevMessage
             await musicPlayer.forcePlay({
-              query: prevVideo.url,
+              query: prevVideo?.url,
               userId,
               overrideCurrentEmbed: true,
             })
           }
         }
         break
+      }
 
       case EMBED_CONTROLS.PLAY: {
         await interaction.deferUpdate()
@@ -140,10 +142,7 @@ export default {
           })
           if (musicPlayer.player.state.status !== AudioPlayerStatus.Idle) {
             await interaction.followUp({
-              content: `Added [${truncateText(
-                escapeDiscordMarkdown(videoData.title),
-                45
-              )}](<${videoData.url}>) to the queue!`,
+              content: `Added [${(escapeDiscordMarkdown(videoData.title), 45)}](<${videoData.url}>) to the queue!`,
               flags: MessageFlags.Ephemeral,
             })
           }
@@ -159,11 +158,19 @@ export default {
 
       case EMBED_CONTROLS.LIKE:
         try {
-          playlistCtrl.addFavorite(userId, videoData.id)
-          interaction.reply({
+          await playlistCtrl.addFavorite(userId, videoData.id)
+          await userState.clearInteraction()
+
+          const undoButton = new ActionRowBuilder<ButtonBuilder>().addComponents(
+            new ButtonBuilder().setCustomId(UNDO.LIKE).setLabel('Undo').setEmoji('↩️').setStyle(ButtonStyle.Secondary)
+          )
+          await interaction.reply({
             content: `Added [${videoData.title}](<${videoData.url}>) to your liked music!`,
+            components: [undoButton],
             ephemeral: true,
           })
+          userState.interaction = interaction
+          userState.selectedVideo = videoData
         } catch (error: any) {
           interaction.reply({
             content: error?.message || 'Something wrong like',
@@ -171,14 +178,10 @@ export default {
           })
         }
         break
-
       case EMBED_CONTROLS.AUTOPLAY:
         try {
+          await interaction.deferUpdate()
           await musicPlayer.handleAutoplay(!musicPlayer.autoplay)
-          await interaction.reply({
-            content: `Autoplay ${musicPlayer.autoplay ? 'enabled' : 'disabled'}!`,
-            flags: MessageFlags.Ephemeral,
-          })
         } catch (err) {
           console.error(err)
         }
@@ -192,6 +195,25 @@ export default {
           console.error(err)
         }
         break
+
+      case EMBED_CONTROLS.RETRY: {
+        await interaction.deferUpdate()
+        const connected = await ensureVoiceConnectionOrReply(interaction, session, userId)
+        if (!connected) break
+
+        try {
+          musicPlayer.embedManager.message = message
+          await musicPlayer.forcePlay({
+            query: videoData.url,
+            userId,
+            overrideCurrentEmbed: true,
+          })
+        } catch (err) {
+          console.error(err)
+        }
+
+        break
+      }
     }
   },
 }

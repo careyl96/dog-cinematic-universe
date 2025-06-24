@@ -10,8 +10,8 @@ import {
 } from '@discordjs/voice'
 import { ChatInputCommandInteraction, EmbedBuilder, Message } from 'discord.js'
 import { fetchYoutubeVideosFromUrlOrQuery, FormattedYoutubeVideo } from './helpers/youtubeHelpers/youtubeHelpers'
-import { NowPlayingEmbedState } from './helpers/embedHelpers'
-import { BOT_USER_ID } from './constants'
+import { createUndoButtonRow, NowPlayingEmbedState } from './helpers/embedHelpers'
+import { BOT_USER_ID, UNDO } from './constants'
 import { Readable } from 'stream'
 
 import { shuffle } from './helpers/otherHelpers'
@@ -20,7 +20,7 @@ import { cacheAudioResource, getAudioSource } from './helpers/cacheHelpers'
 import { getRandomVideos } from './helpers/playerFunctions'
 import { cachedTrackCtrl, trackCtrl } from './backend/controllers/Controllers'
 import { GuildSession } from './GuildSession'
-import { EmbedStateManager } from './EmbedStateManager'
+import { EmbedManager, ExtendedTrack } from './EmbedManager'
 import { UncompressedTrack } from './helpers/youtubeHelpers/youtubeFormatterHelpers'
 
 interface YoutubeMusicPlayerOptions {
@@ -66,8 +66,8 @@ export class YoutubeMusicPlayer {
   private _volume: number = 0.5
   private _audioResource: AudioResource | null = null
 
-  public track: UncompressedTrack
-  public embedStateManager: EmbedStateManager
+  public track: ExtendedTrack
+  public embedManager: EmbedManager
   private shouldPlayNextInQueue: boolean
 
   constructor({ session }: YoutubeMusicPlayerOptions) {
@@ -82,7 +82,7 @@ export class YoutubeMusicPlayer {
     this._queue = []
 
     this.track = null
-    this.embedStateManager = new EmbedStateManager(session)
+    this.embedManager = new EmbedManager(session)
     this.shouldPlayNextInQueue = true
 
     this.setupAudioPlayerEventListeners()
@@ -103,7 +103,7 @@ export class YoutubeMusicPlayer {
     })
     this.player.on('error', async (err: Error) => {
       console.error(`AudioPlayer error:`, err)
-      await this.embedStateManager.updateEmbed(NowPlayingEmbedState.Error)
+      await this.embedManager.updateEmbed(NowPlayingEmbedState.Error)
       await cachedTrackCtrl.delete(this.track.id)
     })
   }
@@ -133,7 +133,7 @@ export class YoutubeMusicPlayer {
       session: this.session,
       urlOrQuery: query,
       useYts,
-    })) as any
+    })) as UncompressedTrack | FormattedYoutubeVideo
 
     // This flag prevents the next track from auto-playing when the audio player becomes idle.
     // It's used during force play to avoid overlapping playback of the current and next track.
@@ -195,7 +195,14 @@ export class YoutubeMusicPlayer {
 
         await interaction.followUp({
           embeds: [embed],
+          components: [createUndoButtonRow(UNDO.QUEUE)],
           ephemeral: true,
+        })
+        const userState = this.session.userState.get(userId)
+        userState.interaction = interaction
+        userState.queuedTracks = videos
+        videos.forEach((video) => {
+          userState.interactionWithId[video.id] = interaction
         })
       }
     }
@@ -234,7 +241,8 @@ export class YoutubeMusicPlayer {
     await this.session.ensureVoiceConnection(userId)
     this.subscribeToMusicPlayer()
     const track = await trackCtrl.ensureTrackCompleteOrUpsert(video, userId)
-    this.embedStateManager.setTrack({ track, userId })
+    this.embedManager.setTrack({ track, userId })
+    this.track = track
 
     try {
       if (!overrideCurrentEmbed) {
@@ -246,10 +254,10 @@ export class YoutubeMusicPlayer {
       if (overrideCurrentEmbed) {
         // override flag to enable the changing finished/skipped state in embed
         // when finished/skipped state is set on embed, it normally cannot be changed
-        this.embedStateManager.updateEmbed(NowPlayingEmbedState.Loading)
+        this.embedManager.updateEmbed(NowPlayingEmbedState.Loading)
       } else {
         // create a new embed every time playAudioFromYTVideo is called
-        this.embedStateManager.sendInitialEmbed()
+        this.embedManager.sendInitialEmbed()
       }
       /* -------------------------------------------------------------- */
 
@@ -295,16 +303,16 @@ export class YoutubeMusicPlayer {
 
   async handleTrackStarted() {
     this.session.stopIdleTimer()
-    await this.embedStateManager.handlePlay()
+    await this.embedManager.handlePlay()
   }
 
   async handleTrackPaused() {
-    await this.embedStateManager.handlePause()
+    await this.embedManager.handlePause()
   }
 
   async handleTrackFinished() {
     await this.session.startIdleTimer()
-    await this.embedStateManager.handleFinished()
+    await this.embedManager.handleFinished()
     this.shouldPlayNextInQueue && (await this.playNextInQueue())
   }
 
@@ -354,7 +362,7 @@ export class YoutubeMusicPlayer {
   } = {}) {
     try {
       if (skip) {
-        this.embedStateManager.skippedByUserId = skippedByUserId
+        this.embedManager.skippedByUserId = skippedByUserId
         formatFramedCommand(`Track skipped by @${skippedByUserId}`)
       }
 
@@ -363,7 +371,7 @@ export class YoutubeMusicPlayer {
       console.error('Error occurred while stopping the track:', e)
 
       try {
-        await this.embedStateManager.updateEmbed(NowPlayingEmbedState.Error)
+        await this.embedManager.updateEmbed(NowPlayingEmbedState.Error)
       } catch (embedError) {
         console.error('Failed to update NowPlaying embed after error:', embedError)
       }
