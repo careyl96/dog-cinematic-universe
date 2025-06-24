@@ -1,5 +1,6 @@
 import { SlashCommandBuilder, MessageFlags, EmbedBuilder } from 'discord.js'
 import { YoutubeMusicPlayer } from '../../MusicPlayer'
+import { client } from '../..'
 
 // Utility to swap two items in an array
 const swapTracks = async (musicPlayer: YoutubeMusicPlayer, queue: any[], indexA: number, indexB: number) => {
@@ -15,7 +16,8 @@ export default {
       option.setName('position2').setDescription('Second track position').setRequired(true)
     ),
   async execute(interaction: any) {
-    const musicPlayer = interaction.client.musicPlayer
+    const session = client.guildSessions.get(interaction.guildId)
+    const musicPlayer = session.musicPlayer
     const queue = musicPlayer.queue
 
     if (!queue || queue.length === 0) {
@@ -48,7 +50,14 @@ export default {
 
     const track1 = queue[pos1]
     const track2 = queue[pos2]
-    const reply = `[${pos2 + 1}] [${track2.video.title}](${track2.video.url}) \n [${pos1 + 1}] [${track1.video.title}](${track1.video.url})`
+    let reply: string
+
+    if (pos1 <= pos2) {
+      reply = `[${pos1 + 1}] [${track1.video.title}](${track1.video.url}) \n[${pos2 + 1}] [${track2.video.title}](${track2.video.url})`
+    } else {
+      reply = `[${pos2 + 1}] [${track2.video.title}](${track2.video.url}) \n[${pos1 + 1}] [${track1.video.title}](${track1.video.url})`
+    }
+
     await interaction.reply({
       embeds: [new EmbedBuilder().setTitle('Updated track positions:').setDescription(reply)],
       flags: MessageFlags.Ephemeral,

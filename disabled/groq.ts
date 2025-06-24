@@ -1,8 +1,8 @@
 import { InteractionContextType, SlashCommandBuilder } from 'discord.js'
-import { handleGroqSlashCommand } from '../../groq/groq'
-import { createGroqEmbed, createRawEmbed } from '../../helpers/embedHelpers'
-import { chunkifyText, getCharacterCount } from '../../helpers/formatterHelpers'
-import { BOT_USER_ID } from '../../constants'
+import { handleGroqSlashCommand } from '../src/groq/groq'
+import { createGroqEmbed, createRawEmbed } from '../src/helpers/embedHelpers'
+import { chunkifyText, getCharacterCount } from '../src/helpers/formatterHelpers'
+import { BOT_USER_ID } from '../src/constants'
 
 export default {
   data: new SlashCommandBuilder()

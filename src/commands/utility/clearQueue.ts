@@ -1,5 +1,5 @@
 import { ChatInputCommandInteraction, EmbedBuilder, InteractionContextType, SlashCommandBuilder } from 'discord.js'
-import { ClientWithCommands } from '../../ClientWithCommands'
+import { client } from '../..'
 
 export default {
   data: new SlashCommandBuilder()
@@ -7,9 +7,9 @@ export default {
     .setDescription('Clears audio queue')
     .setContexts(InteractionContextType.Guild),
   async execute(interaction: ChatInputCommandInteraction) {
-    const client = interaction.client as ClientWithCommands
+    const session = client.guildSessions.get(interaction.guildId)
     try {
-      await client.musicPlayer?.clearQueue()
+      await session.musicPlayer?.clearQueue()
 
       const queueEmbed = new EmbedBuilder().setDescription('Queue has been cleared')
       await interaction.reply({ embeds: [queueEmbed] })

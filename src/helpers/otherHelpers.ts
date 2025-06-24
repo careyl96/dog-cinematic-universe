@@ -3,7 +3,7 @@ import { readdir, stat, unlink } from 'fs/promises'
 import dotenv from 'dotenv'
 import { Message } from 'discord.js'
 import { client } from '..'
-import { MAX_AUDIO_FILES } from '../constants'
+import { MAX_AUDIO_FILES, VOICE_CHANNEL_IDS } from '../constants'
 
 dotenv.config()
 
@@ -42,9 +42,13 @@ export const shuffle = (array: any) => {
   return array
 }
 
-export const getGuildMember = async (userId: string) => {
+export const pickRandomItemsFromList = (array: any[], count: number = 0) => {
+  return shuffle(array).slice(0, count)
+}
+
+export const getGuildMember = async (userId: string, guildId: string) => {
   try {
-    const guild = await client.guilds.fetch(process.env.DISCORD_GUILD_ID!)
+    const guild = await client.guilds.fetch(guildId)
     const member = await guild.members.fetch(userId)
     return member
   } catch (error) {
@@ -121,5 +125,3 @@ export const getRandomKeys = (obj: Record<string, any>): string[] => {
   // Return the first `n` keys from the shuffled array
   return keys
 }
-
-

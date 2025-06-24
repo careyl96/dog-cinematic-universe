@@ -3,83 +3,57 @@ import path from 'path'
 import dotenv from 'dotenv'
 import { REST, Routes } from 'discord.js'
 import { PATH } from './src/constants'
+import { guildCtrl } from './src/backend/controllers/Controllers'
+import { AppDataSource } from './src/backend/db/data-source'
 
 dotenv.config()
 
-console.log('deploy commands called')
-const commands: any[] = []
-const foldersPath = PATH.COMMANDS
-const commandFolders = fs.readdirSync(foldersPath)
+AppDataSource.initialize().then(() => {
+  const commands: any[] = []
+  const foldersPath = PATH.COMMANDS
+  const commandFolders = fs.readdirSync(foldersPath)
 
-const loadCommands = async () => {
-  for (const folder of commandFolders) {
-    const commandsPath = path.join(foldersPath, folder)
-    const commandFiles = fs
-      .readdirSync(commandsPath)
-      .filter((file) => file.endsWith('.ts'))
+  const loadCommands = async () => {
+    for (const folder of commandFolders) {
+      const commandsPath = path.join(foldersPath, folder)
+      const commandFiles = fs.readdirSync(commandsPath).filter((file) => file.endsWith('.ts'))
 
-    for (const file of commandFiles) {
-      const filePath = path.join(commandsPath, file)
-      const command = await (await import(`${filePath}`)).default
-      if ('data' in command && 'execute' in command) {
-        commands.push(command.data.toJSON())
-      } else {
-        console.log(
-          `[WARNING] The command at ${filePath} is missing a required "data" or "execute" property.`
-        )
+      for (const file of commandFiles) {
+        const filePath = path.join(commandsPath, file)
+        const command = await (await import(`${filePath}`)).default
+        if ('data' in command && 'execute' in command) {
+          commands.push(command.data.toJSON())
+        } else {
+          console.log(`[WARNING] The command at ${filePath} is missing a required "data" or "execute" property.`)
+        }
       }
     }
   }
-}
 
-// Deploy commands
-const deployCommands = async () => {
-  try {
-    await loadCommands() // Ensure commands are loaded before deploying
+  // Deploy to all guilds
+  const deployCommands = async () => {
+    try {
+      await loadCommands()
+      const rest = new REST().setToken(process.env.DISCORD_TOKEN!)
+      const allGuilds = await guildCtrl.getAll()
 
-    console.log(
-      `Started refreshing ${commands.length} application (/) commands.`
-    )
+      for (const guild of allGuilds) {
+        try {
+          const data: any = await rest.put(Routes.applicationGuildCommands(process.env.DISCORD_CLIENT_ID!, guild.id), {
+            body: commands,
+          })
 
-    const rest = new REST().setToken(process.env.DISCORD_TOKEN!)
-    const data: any = await rest.put(
-      Routes.applicationGuildCommands(
-        process.env.DISCORD_CLIENT_ID!,
-        process.env.DISCORD_GUILD_ID!
-      ),
-      { body: commands }
-    )
-
-    console.log(
-      `Successfully reloaded ${data.length} application (/) commands.`
-    )
-  } catch (error) {
-    console.error(error)
+          console.log(`✅ Successfully deployed ${data.length} commands to guild ${guild.id}`)
+        } catch (err) {
+          console.error(`❌ Failed to deploy to guild ${guild.id}:`, err)
+        }
+      }
+    } catch (error) {
+      console.error('‼️ Error during deployment:', error)
+    }
   }
-}
 
-const clearCommands = async () => {
-  const rest = new REST().setToken(process.env.DISCORD_TOKEN!)
-  try {
-    // Target global commands by using `Routes.applicationCommands` (no guild ID)
-    await rest.put(
-      Routes.applicationCommands(process.env.DISCORD_CLIENT_ID!),
-      { body: [] } // Clears all guild commands
-    )
-
-    await rest.put(
-      Routes.applicationGuildCommands(
-        process.env.DISCORD_CLIENT_ID!,
-        process.env.DISCORD_GUILD_ID!
-      ),
-      { body: [] } // Clears all guild commands
-    )
-    console.log('Successfully deleted all guild commands.')
-  } catch (error) {
-    console.error('!!! Failed to clear commands:', error)
-  }
-}
-
-// Run the deployment process
-deployCommands()
-// clearCommands()
+  // Run deployment
+  deployCommands()
+  // clearCommands() // optional
+})

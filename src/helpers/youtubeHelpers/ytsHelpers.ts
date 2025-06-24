@@ -1,6 +1,7 @@
 import yts from 'yt-search'
-import { createYoutubeUrlFromId, FormattedYoutubeVideo, isValidYoutubeUrl } from './youtubeFormatterHelpers'
+import { createYoutubeUrlFromId } from './youtubeFormatterHelpers'
 import { timestampToISO } from '../formatterHelpers'
+import { FormattedYoutubeVideo } from './youtubeHelpers'
 
 // --- YT-Search helpers
 export const fetchViaYTS = async ({

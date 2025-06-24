@@ -1,13 +1,15 @@
 import { Events, Interaction, MessageFlags } from 'discord.js'
 import { ClientWithCommands } from '../ClientWithCommands'
 import { createErrorEmbed } from '../helpers/embedHelpers'
+import { GuildSession } from '../GuildSession'
 
 export default {
   name: Events.InteractionCreate,
   once: false,
-  async execute(client: ClientWithCommands, interaction: Interaction) {
+  async execute(client: ClientWithCommands, session: GuildSession, interaction: Interaction) {
     if (!interaction.isChatInputCommand()) return
 
+    console.log('slash command used', interaction.commandName)
     const command = client.commands.get(interaction.commandName)
     if (!command) {
       console.error(`No command matching ${interaction.commandName} was found.`)
@@ -16,12 +18,9 @@ export default {
 
     try {
       const deferEarly = [
-        'tts',
         'play',
-        'cache', // temp
-        'noncached', // temp
-        'playprev',
-        'groq',
+        // 'tts',
+        // 'groq',
       ]
 
       const deferThenDelete = [
@@ -29,14 +28,14 @@ export default {
         'skip',
         'shuffle',
         'pause',
-        'roulette',
-        'enablevoicecommands',
-        'disablevoicecommands',
         'unpause',
+        // 'roulette',
+        // 'enablevoicecommands',
+        // 'disablevoicecommands',
       ]
 
       if (deferEarly.includes(interaction.commandName)) {
-        await interaction.deferReply()
+        await interaction.deferReply({ flags: MessageFlags.Ephemeral })
       }
 
       if (interaction.commandName === 'remove') {

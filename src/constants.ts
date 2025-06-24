@@ -103,7 +103,6 @@ export const EMBED_CONTROLS = {
   STOP: 'stop',
   QUEUE: 'queue',
   VIEW_QUEUE: 'view_queue',
-  REPLAY: 'replay',
   AUTOPLAY: 'autoplay',
   ROULETTE: 'roulette',
   BACK: 'back',
@@ -117,16 +116,17 @@ export const EMBED_CONTROLS = {
   // VOLUME_UNMUTE: '🔈',
 }
 
-export const VOICE_CHANNEL_IDS = [
-  '1173363391046352926', // warriors in 3
-  '727282992958931066', // anti-social social room
-  '1059957383436185700', // content kingdom
-  '854513897180102657', // yes we still play runescape
-  '1022611880809877616', // building the cache
-  '1022611880809877616', // tfti
-]
+// export const VOICE_CHANNEL_IDS = [
+//   '1173363391046352926', // warriors in 3
+//   '727282992958931066', // anti-social social room
+//   '1059957383436185700', // content kingdom
+//   '854513897180102657', // yes we still play runescape
+//   '1022611880809877616', // building the cache
+// ]
+export const VOICE_CHANNEL_IDS = ['1377074782679335116']
 
 export const TEXT_CHANNELS = {
-  MUSIC_BOT: '541924016412426242',
+  // MUSIC_BOT: '541924016412426242',
+  MUSIC_BOT: '1377074782679335115',
   GROQ_OUTPUT: '1364745947292106935',
 }

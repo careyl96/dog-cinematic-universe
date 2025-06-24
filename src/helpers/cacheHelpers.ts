@@ -1,100 +1,83 @@
-import fs from 'fs'
-import path from 'path'
-import { MAX_AUDIO_FILES, PATH } from '../constants'
-import {
-  createYoutubeUrlFromId,
-  FormattedYoutubeVideo,
-  toCompressedYoutubeVideo,
-  uncompressYoutubeVideo,
-  YoutubeCache,
-} from './youtubeHelpers/youtubeFormatterHelpers'
-import { formatFramedCommand } from './formatterHelpers'
 import { Readable } from 'stream'
 import ffmpeg from 'fluent-ffmpeg'
-import { createYoutubeAudioStream } from './youtubeHelpers/youtubeHelpers'
+import { createYoutubeAudioStream, FormattedYoutubeVideo } from './youtubeHelpers/youtubeHelpers'
+import { CachedTrackController } from '../backend/controllers/CachedTrackController'
+import { TrackController } from '../backend/controllers/TrackController'
+import { cachedTrackCtrl } from '../backend/controllers/Controllers'
+import { Track } from '../backend/entities/Track'
+import { UncompressedTrack } from './youtubeHelpers/youtubeFormatterHelpers'
 
-export const cacheAudioResource = async (stream: Readable, video: FormattedYoutubeVideo) => {
-  const tempPath = path.join(PATH.AUDIO_FILES.GENERATED.YOUTUBE.CACHE, `temp.ogg`)
-  const outputPath = path.join(PATH.AUDIO_FILES.GENERATED.YOUTUBE.CACHE, `${video.id}.ogg`)
-  const musicCacheJsonFilePath = path.join(PATH.AUDIO_FILES.GENERATED.YOUTUBE.DEFAULT, 'cache.json')
-  let musicCacheJson: YoutubeCache = {}
+export const cacheAudioResource = async (
+  stream: Readable,
+  video: UncompressedTrack | FormattedYoutubeVideo
+): Promise<void> => {
+  const MAX_SIZE = 10 * 1024 * 1024 // 10 MB
+  const cachedTrackCtrl = new CachedTrackController()
+  const trackCtrl = new TrackController()
 
-  fs.mkdirSync(PATH.AUDIO_FILES.GENERATED.YOUTUBE.DEFAULT, { recursive: true })
-  if (fs.existsSync(musicCacheJsonFilePath)) {
-    musicCacheJson = JSON.parse(fs.readFileSync(musicCacheJsonFilePath, 'utf-8'))
-    if (musicCacheJson[video.id]) return
+  const track = await trackCtrl.getById(video.id)
+  if (!track) {
+    console.warn(`⚠️ Track not found for video ${video.id}. Skipping cache.`)
+    return
   }
 
-  const addVideoDataToJSONCache = () => {
-    const cacheKeys = Object.keys(musicCacheJson)
-    if (!musicCacheJson[video.id] && cacheKeys.length >= MAX_AUDIO_FILES) {
-      const oldestKey = cacheKeys[0] // Insertion order is preserved
+  const alreadyCached = await cachedTrackCtrl.getById(video.id)
+  if (alreadyCached) return
 
-      // delete .ogg from disk and evict from cache
-      fs.unlink(path.join(PATH.AUDIO_FILES.GENERATED.YOUTUBE.CACHE, `${oldestKey}.ogg`), (err) => {
-        if (err) {
-          console.error('error deleting file:', err)
-        } else {
-          delete musicCacheJson[oldestKey]
-          console.log(`evicted ${oldestKey}.ogg`)
-        }
-      })
-    }
-    const compressed = toCompressedYoutubeVideo(video)
-    musicCacheJson[video.id] = compressed
+  const chunks: Buffer[] = []
+  let totalSize = 0
+  let exceeded = false
 
-    // NOTE: this writes the json file with human readable indentation (which occupies additional space)
-    // small optimization would be to remove spacing to save on space
-    fs.writeFileSync(musicCacheJsonFilePath, JSON.stringify(musicCacheJson, null, 2), 'utf-8')
-  }
-
-  const addVideoDataToAudioCache = () => {
-    fs.rename(tempPath, outputPath, (error) => {
-      if (error) {
-        // Show the error
-        console.error(error)
-      } else {
-        formatFramedCommand(`${video.id}.ogg saved to cache successfully`)
-      }
-    })
-  }
-
-  // save audio file
-  await new Promise<void>((resolve, reject) => {
-    ffmpeg(stream)
-      .audioCodec('copy')
+  await new Promise<void>((resolve) => {
+    const ffmpegProcess = ffmpeg(stream)
+      .inputFormat('webm')
+      .audioCodec('libvorbis')
       .format('ogg')
-      .on('error', async (err: any) => {})
-      .on('end', () => {
-        addVideoDataToJSONCache()
-        addVideoDataToAudioCache()
-        // enforceFileLimit(PATH.AUDIO_FILES.GENERATED.YOUTUBE.CACHE)
+      .on('error', (err) => {
+        console.warn(`⚠️ FFmpeg error for ${video.id}:`, err.message)
         resolve()
       })
-      .save(tempPath)
+
+    const output = ffmpegProcess.pipe()
+
+    output.on('data', (chunk: Buffer) => {
+      if (exceeded) return
+
+      totalSize += chunk.length
+      if (totalSize > MAX_SIZE) {
+        console.warn(`⚠️ Skipped caching: Audio exceeds 10MB limit for video ${video.id}`)
+        exceeded = true
+        chunks.length = 0 // Clear accumulated data
+        return
+      }
+
+      chunks.push(chunk)
+    })
+
+    output.on('end', async () => {
+      if (exceeded || chunks.length === 0) return resolve()
+
+      try {
+        const oggBuffer = Buffer.concat(chunks)
+        const cachedTrack = await cachedTrackCtrl.upsert(video.id, oggBuffer, track)
+        const { data, ...rest } = cachedTrack
+        console.log(`💾 Cached audio!`, rest)
+      } catch (e) {
+        console.error(`❌ Error saving cached audio for ${video.id}:`, e)
+      }
+
+      resolve()
+    })
   })
 }
-export const getVideoDataFromCache = (id: string): FormattedYoutubeVideo => {
-  const videoDataCacheJson = path.join(PATH.AUDIO_FILES.GENERATED.YOUTUBE.DEFAULT, 'cache.json')
-  if (fs.existsSync(videoDataCacheJson)) {
-    const cache: YoutubeCache = JSON.parse(fs.readFileSync(videoDataCacheJson, 'utf-8'))
-    const cachedVideo = cache[id]
-    if (cachedVideo) {
-      const video = uncompressYoutubeVideo(cachedVideo)
-      return video as FormattedYoutubeVideo
-    }
+
+export const getAudioSource = async (video: UncompressedTrack | FormattedYoutubeVideo) => {
+  const cachedTrack = await cachedTrackCtrl.getById(video.id)
+
+  return {
+    cachedTrack: !!cachedTrack,
+    audioStream: cachedTrack?.data
+      ? Readable.from([cachedTrack.data]) // note: safer than just .from(cachedTrack.data)
+      : await createYoutubeAudioStream(video),
   }
-  return null
-}
-
-export const getAudioFileFromCache = (id: string): string | null => {
-  const audioFileCachePath = path.join(PATH.AUDIO_FILES.GENERATED.YOUTUBE.CACHE, `${id}.ogg`)
-  return fs.existsSync(audioFileCachePath) ? audioFileCachePath : null
-}
-
-export const getAudioSource = async (video: FormattedYoutubeVideo) => {
-  // either returns an ogg file from cache or stream
-  // const cachedFilePath = getAudioFileFromCache(video.id)
-  // const youtubeAudioStream = await createYoutubeAudioStream(video)
-  return getAudioFileFromCache(video.id) || (await createYoutubeAudioStream(video))
 }

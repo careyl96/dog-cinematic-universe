@@ -1,38 +1,18 @@
-export interface FormattedYoutubeVideo {
-  title: string
+import { Track } from '../../backend/entities/Track'
+import { FormattedYoutubeVideo } from './youtubeHelpers'
+
+export type UncompressedTrack = Track & {
   url: string
-  id: string
-  duration: string
   thumbnail: string
-  liveBroadcastContent?: 'live' | 'none'
 }
 
-export interface FormattedYoutubeVideoCompressed
-  extends Pick<FormattedYoutubeVideo, 'title' | 'id' | 'duration' | 'liveBroadcastContent'> {}
-
-export const toCompressedYoutubeVideo = ({
-  title,
-  id,
-  duration,
-  liveBroadcastContent,
-}: FormattedYoutubeVideo): FormattedYoutubeVideoCompressed => ({
-  title: title,
-  id: id,
-  duration: duration,
-  ...(liveBroadcastContent ? { liveBroadcastContent: liveBroadcastContent } : {}),
-})
-
-export const uncompressYoutubeVideo = (compressedYoutubeVideo: FormattedYoutubeVideoCompressed) => {
+export const uncompressTrack = (track: Track): UncompressedTrack => {
   return {
-    ...compressedYoutubeVideo,
-    url: createYoutubeUrlFromId(compressedYoutubeVideo.id),
-    thumbnail: `https://i.ytimg.com/vi/${compressedYoutubeVideo.id}/default.jpg`,
-    liveBroadcastContent: compressedYoutubeVideo.liveBroadcastContent || 'none',
+    ...track,
+    url: createYoutubeUrlFromId(track.id),
+    thumbnail: `https://i.ytimg.com/vi/${track.id}/default.jpg`,
+    liveBroadcastContent: track.liveBroadcastContent || 'none',
   }
-}
-
-export interface YoutubeCache {
-  [key: string]: FormattedYoutubeVideo | FormattedYoutubeVideoCompressed
 }
 
 export const formatYoutubeVideoFromIdSearch = (video: any): FormattedYoutubeVideo => {
@@ -45,7 +25,6 @@ export const formatYoutubeVideoFromIdSearch = (video: any): FormattedYoutubeVide
   //   liveBroadcastContent: 'none'
   // }
   const formattedVideo = {} as any
-  // formattedVideo.title = isLiveVideo ? `🔴 LIVE 🔴 - ${video.snippet.title}` : video.snippet.title
   formattedVideo.title = video.snippet.title
   formattedVideo.url = `https://www.youtube.com/watch?v=${video.id}`
   formattedVideo.id = video.id
@@ -57,7 +36,7 @@ export const formatYoutubeVideoFromIdSearch = (video: any): FormattedYoutubeVide
 }
 
 export const extractYouTubeIdFromUrl = (url: string) => {
-  let match = url.match(/(?:youtube\.com\/(?:.*[?&]v=|embed\/|v\/|shorts\/)|youtu\.be\/)([^?&/]+)/)
+  let match = url?.match(/(?:youtube\.com\/(?:.*[?&]v=|embed\/|v\/|shorts\/)|youtu\.be\/)([^?&/]+)/)
 
   return match ? match[1] : ''
 }

@@ -196,7 +196,7 @@ export const isoToTimestamp = (isoDuration: string) => {
   return formattedTime
 }
 
-export const parseISODurationToMs = (duration: string): number => {
+export const isoToMs = (duration: string): number => {
   if (!duration) return
   // Regex for ISO 8601 durations like "PT1H30M15S", "P1DT12H"
   const regex =
@@ -231,8 +231,14 @@ export const parseISODurationToMs = (duration: string): number => {
   )
 }
 
-export const escapeDiscordMarkdown = (text: string) => {
-  return text.replace(/\|\|/g, '|︱')
+export const escapeDiscordMarkdown = (text: string): string => {
+  if (!text) return '(INVALID TITLE)'
+  return text
+    .replace(/\|\|/g, '|︱') // Break spoiler syntax
+    .replace(/\[/g, '⟦') // Replace [
+    .replace(/\]/g, '⟧') // Replace ]
+    .replace(/\(/g, '﹙') // Replace (
+    .replace(/\)/g, '﹚') // Replace )
 }
 
 // rounds down to lowest 10
@@ -256,8 +262,9 @@ export const stripBackticks = (str: string): string => {
 }
 
 export const generateProgressBar = (percent: number, barLength = 10): string => {
-  const filled = Math.floor((percent / 100) * barLength)
-  const empty = barLength - filled
+  const clampedPercent = Math.max(0, Math.min(100, percent)) // ensure 0 <= percent <= 100
+  const filled = Math.floor((clampedPercent / 100) * barLength)
+  const empty = Math.max(0, barLength - filled) // safeguard against any edge case
 
   return `［ ${'￭'.repeat(filled)}${'･'.repeat(empty)} ］`
 }

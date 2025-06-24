@@ -1,5 +1,6 @@
 import { SlashCommandBuilder, MessageFlags, EmbedBuilder, InteractionContextType } from 'discord.js'
 import { YoutubeMusicPlayer } from '../../MusicPlayer'
+import { client } from '../..'
 
 // Utility to move an item in an array from one position to another
 const moveTrack = async (musicPlayer: YoutubeMusicPlayer, queue: any[], fromIndex: number, toIndex: number) => {
@@ -17,7 +18,8 @@ export default {
     ),
 
   async execute(interaction: any) {
-    const musicPlayer = interaction.client.musicPlayer
+    const session = client.guildSessions.get(interaction.guildId)
+    const musicPlayer = session.musicPlayer
     const queue = musicPlayer.queue
 
     if (!queue || queue.length === 0) {

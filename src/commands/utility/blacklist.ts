@@ -1,10 +1,8 @@
-import fs from 'fs'
-import path from 'path'
 import { EmbedBuilder, InteractionContextType, MessageFlags, SlashCommandBuilder } from 'discord.js'
-import { BOT_USER_ID, PATH } from '../../constants'
 import { createErrorEmbed } from '../../helpers/embedHelpers'
 import { client } from '../..'
 import { removeFromQueue } from '../../helpers/playerFunctions'
+import { trackCtrl } from '../../backend/controllers/Controllers'
 
 export default {
   data: new SlashCommandBuilder()
@@ -20,33 +18,24 @@ export default {
     .setContexts(InteractionContextType.Guild),
 
   async execute(interaction: any) {
+    const session = client.guildSessions.get(interaction.guildId)
     const userId = interaction.user.id
     const queueItemIndex = interaction.options.getInteger('queueitem') || 0
 
-    const dirPath = path.join(PATH.USER_DATA, BOT_USER_ID)
-    const filePath = path.join(dirPath, 'blacklisted_music.json')
-
     try {
-      const currentlyPlaying = client.musicPlayer.currentlyPlaying
-      const queue = client.musicPlayer.queue
-      queue.unshift(currentlyPlaying)
+      const currentlyPlaying = session.musicPlayer.currentlyPlaying
+      const queue = session.musicPlayer.queue
+      if (currentlyPlaying) queue.unshift(currentlyPlaying)
 
       const itemToBlacklist = queue[queueItemIndex].video
 
-      fs.mkdirSync(dirPath, { recursive: true })
-      let blacklist: string[] = []
-      if (fs.existsSync(dirPath)) {
-        blacklist = JSON.parse(fs.readFileSync(filePath, 'utf-8'))
-        if (blacklist.indexOf(itemToBlacklist.id) !== -1) return
-      }
-      blacklist.push(itemToBlacklist.id)
-
       if (queueItemIndex === 0) {
-        client.musicPlayer.skip(userId)
+        session.musicPlayer.skip(userId)
       } else {
-        removeFromQueue({ videoId: itemToBlacklist.id })
+        removeFromQueue({ session, videoId: itemToBlacklist.id })
       }
-      fs.writeFileSync(filePath, JSON.stringify(blacklist))
+      const blacklistedItem = await trackCtrl.blacklistById(itemToBlacklist.id)
+      console.log(blacklistedItem)
 
       await interaction.reply({
         embeds: [new EmbedBuilder().setTitle('Blacklisted item:').setDescription(`- ${itemToBlacklist.title}`)],

@@ -1,10 +1,10 @@
-import { Events, TextChannel } from 'discord.js'
+import { Events } from 'discord.js'
 import { ClientWithCommands } from '../ClientWithCommands'
 import { BOT_USER_ID, TEXT_CHANNELS } from '../constants'
-import { createOrUpdateSongBlacklist, createOrUpdateUsersLikedMusic } from '../helpers/musicDataHelpers'
-import { getVideoDataFromMessage, NowPlayingEmbedState } from '../helpers/embedHelpers'
-import { FormattedYoutubeVideo } from '../helpers/youtubeHelpers/youtubeFormatterHelpers'
+import { extractVideoDataFromMessage, NowPlayingEmbedState } from '../helpers/embedHelpers'
 import { removeFromQueue } from '../helpers/playerFunctions'
+import { playlistCtrl, trackCtrl } from '../backend/controllers/Controllers'
+import { GuildSession } from '../GuildSession'
 
 // UNUSED AS OF 5/21/2025
 // Raw instead of MessageReactionAdd/Remove because it doesn't work for cached messages
@@ -12,40 +12,42 @@ import { removeFromQueue } from '../helpers/playerFunctions'
 export default {
   name: Events.Raw,
   once: false,
-  async execute(client: ClientWithCommands, packet: any) {
+  async execute(client: ClientWithCommands, session: GuildSession, packet: any) {
     if (
       packet.d.user_id === BOT_USER_ID ||
       packet.d.channel_id !== TEXT_CHANNELS.MUSIC_BOT ||
       (packet.t !== 'MESSAGE_REACTION_ADD' && packet.t !== 'MESSAGE_REACTION_REMOVE')
     )
       return
-
-    const musicBotChannel = client.channels.cache.get(TEXT_CHANNELS.MUSIC_BOT) as TextChannel
-    const message = await musicBotChannel.messages.fetch(packet.d.message_id)
-
     const userId = packet.d.user_id
+    const guildId = packet.d.guild_id
 
-    const videoData: FormattedYoutubeVideo = getVideoDataFromMessage(message)
+    const { musicPlayer } = session
+    const message = await session.musicBotTextChannel.messages.fetch(packet.d.message_id)
+
+    const videoData: Track = extractVideoDataFromMessage(message)
     if (!videoData) return
 
-    const playerState: NowPlayingEmbedState = client.musicPlayer.nowPlayingEmbedInfo.state
+    const playerState: NowPlayingEmbedState = musicPlayer.embedStateManager.embedState
     if (packet.t === 'MESSAGE_REACTION_ADD') {
       if (packet.d.emoji.name === '❤️') {
-        createOrUpdateUsersLikedMusic(userId, { [videoData.id]: videoData })
+        const newFavorite = await playlistCtrl.addFavorite(userId, videoData.id)
+        console.log('Favorited track:', newFavorite)
         return
       }
       if (packet.d.emoji.name === '🚫') {
-        const currentlyPlaying = client.musicPlayer.currentlyPlaying?.video
+        const currentlyPlaying = musicPlayer.embedStateManager.track
         if (videoData.title === currentlyPlaying?.title) {
           if (
             playerState === NowPlayingEmbedState.Playing ||
             playerState === NowPlayingEmbedState.Paused ||
             playerState === NowPlayingEmbedState.Loading
           ) {
-            client.musicPlayer.skip(userId)
+            musicPlayer.skip(userId)
           }
         }
-        createOrUpdateSongBlacklist({ data: videoData.id, videoData })
+        const blacklistedTrack = await trackCtrl.blacklistById(videoData.id)
+        console.log('Blacklisted tracK: ', blacklistedTrack)
         return
       }
       if (packet.d.emoji.name === '⏭️') {
@@ -54,21 +56,20 @@ export default {
           playerState === NowPlayingEmbedState.Paused ||
           playerState === NowPlayingEmbedState.Loading
         ) {
-          client.musicPlayer.skip(userId)
+          musicPlayer.skip(userId)
         }
         return
       }
       if (packet.d.emoji.name === '🔁') {
-        const currentlyPlaying = client.musicPlayer.currentlyPlaying?.video
+        const currentlyPlaying = musicPlayer.embedStateManager.track
         if (videoData.title === currentlyPlaying?.title) {
-          client.musicPlayer.forcePlay({
+          musicPlayer.forcePlay({
             query: videoData.url,
             userId,
             overrideCurrentEmbed: true,
-            saveToHistory: true,
           })
 
-          const replayReaction = client.musicPlayer.nowPlayingEmbedInfo.message.reactions.cache.get('🔁')
+          const replayReaction = musicPlayer.embedStateManager.message.reactions.cache.get('🔁')
           if (replayReaction) {
             replayReaction.users.cache.forEach((user) => {
               if (user.id !== BOT_USER_ID) {
@@ -76,7 +77,7 @@ export default {
               }
             })
           }
-          const skipReaction = client.musicPlayer.nowPlayingEmbedInfo.message.reactions.cache.get('⏭️')
+          const skipReaction = musicPlayer.embedStateManager.message.reactions.cache.get('⏭️')
           if (skipReaction) {
             skipReaction.users.cache.forEach((user) => {
               if (user.id !== BOT_USER_ID) {
@@ -85,11 +86,10 @@ export default {
             })
           }
         } else {
-          client.musicPlayer.enqueue({
+          musicPlayer.enqueue({
             videosToQueue: videoData,
-            userId: userId,
+            userId,
             queueInPosition: 0,
-            saveToHistory: false,
           })
         }
         return
@@ -98,15 +98,17 @@ export default {
 
     if (packet.t === 'MESSAGE_REACTION_REMOVE') {
       if (packet.d.emoji.name === '❤️') {
-        createOrUpdateUsersLikedMusic(userId, videoData.id)
+        const removedUserFavorite = await playlistCtrl.removeFavorite(userId, videoData.id)
+        console.log('Removed user favorite:', removedUserFavorite)
         return
       }
       if (packet.d.emoji.name === '🚫') {
-        createOrUpdateSongBlacklist({ data: videoData.id, remove: true })
+        const unBlacklistedTrack = await trackCtrl.unBlacklistById(videoData.id)
+        console.log('Unblacklisted track: ', unBlacklistedTrack)
         return
       }
       if (packet.d.emoji.name === '🔁') {
-        removeFromQueue({ videoId: videoData.id })
+        removeFromQueue({ session, videoId: videoData.id })
         return
       }
     }

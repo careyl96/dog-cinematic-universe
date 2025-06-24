@@ -1,15 +1,13 @@
 import { Events } from 'discord.js'
 import { ClientWithCommands } from '../ClientWithCommands'
-import { fetchModels } from '../helpers/voiceCommandHelpers/voiceCommandHelpers'
 
-import cron from 'node-cron'
-import { playHourlyMusic } from '../helpers/hourlyMusicHelpers'
 import { client } from '..'
 import { fetchMessages } from '../helpers/otherHelpers'
 import { BOT_USER_ID, TEXT_CHANNELS } from '../constants'
-import { getVideoDataFromMessage } from '../helpers/embedHelpers'
-import { createOrUpdateUserMusicHistory } from '../helpers/musicDataHelpers'
-import { removeUncachedAudioFiles } from '../helpers/cleanupHelpers'
+import { extractVideoDataFromMessage } from '../helpers/embedHelpers'
+import { trackCtrl } from '../backend/controllers/Controllers'
+import yts from 'yt-search'
+import { formatYTSFromIdSearch } from '../helpers/youtubeHelpers/ytsHelpers'
 
 export default {
   name: Events.ClientReady,
@@ -22,14 +20,40 @@ export default {
 ║                    📣  DOG IS NOW RUNNING  📣                    ║
 ╚══════════════════════════════════════════════════════════════════╝
       `)
-    await fetchModels()
-    // purgeUnavailableTracks()
-    // cleanChannelMessages(20)
-    // removeUncachedAudioFiles()
-    await client.migrateToMostPopulatedVoiceChannelOrDisconnect()
-    // cron.schedule('0 0 * * * *', playHourlyMusic)
+    // await fetchModels()
+    // await seedEmptyTracks()
     console.log('\n* ════════════════════════════════════════════════════════════════ *\n')
   },
+}
+// seed track data into db by fetching via yts
+const seedTrack = async () => {
+  const userId = '120031401948086272'
+  const trackList: string[] = ['t6MRomiT6RU']
+  for (const id of trackList) {
+    try {
+      const searchResult = await yts({ videoId: id })
+      const upsertedTrack = await trackCtrl.upsert({
+        ...formatYTSFromIdSearch(searchResult),
+        firstPlayedBy: userId,
+        userPlayCount: 1,
+      })
+      console.log(upsertedTrack)
+    } catch (err) {}
+  }
+}
+
+const seedEmptyTracks = async () => {
+  const allTracks = (await trackCtrl.getAll()).filter((track) => track.title === null)
+  for (const track of allTracks) {
+    try {
+      const searchResult = await yts({ videoId: track.id })
+      const upsertedTrack = await trackCtrl.upsert(formatYTSFromIdSearch(searchResult))
+      console.log(upsertedTrack)
+    } catch (err) {
+      console.log('error with', track.id)
+      console.log(await trackCtrl.delete(track.id))
+    }
+  }
 }
 
 const checkMemoryUsage = () => {
@@ -43,14 +67,14 @@ const checkMemoryUsage = () => {
 
 // removes all embeds from the music bot channel that were sent by the bot itself
 async function populateMusicHistory(): Promise<void> {
-  const musicBotChannel = client.channels.cache.get(TEXT_CHANNELS.MUSIC_BOT)
-  const messages = await fetchMessages(musicBotChannel, 5000)
+  const musicBotTextChannel = client.channels.cache.get(TEXT_CHANNELS.MUSIC_BOT)
+  const messages = await fetchMessages(musicBotTextChannel, 5000)
 
   const musicHistory: any = {}
   for (const message of messages) {
     if (message.embeds.length > 0) {
       try {
-        const videoData = getVideoDataFromMessage(message)
+        const videoData = extractVideoDataFromMessage(message)
         if (videoData) {
           const videoId = videoData.id
           if (!musicHistory[videoId]) {

@@ -1,224 +1,219 @@
-import fs from 'fs'
-import path from 'path'
-import { EmbedBuilder, GuildMember, MessageFlags } from 'discord.js'
+import { EmbedBuilder, MessageFlags } from 'discord.js'
 import { client } from '..'
-import { fetchYoutubeVideosFromUrlOrQuery } from './youtubeHelpers/youtubeHelpers'
+import { fetchYoutubeVideosFromUrlOrQuery, FormattedYoutubeVideo } from './youtubeHelpers/youtubeHelpers'
 import { AudioPlayerStatus } from '@discordjs/voice'
-import { BOT_USER_ID, PATH } from '../constants'
-import { getGuildMember, getRandomKeys } from './otherHelpers'
-import { shuffle } from './otherHelpers'
-import { createYoutubeUrlFromId, FormattedYoutubeVideo } from './youtubeHelpers/youtubeFormatterHelpers'
-import { getUserMusicHistory } from './musicDataHelpers'
+import { pickRandomItemsFromList } from './otherHelpers'
+import { createYoutubeUrlFromId, UncompressedTrack, uncompressTrack } from './youtubeHelpers/youtubeFormatterHelpers'
 import { QueueItem } from '../MusicPlayer'
+import { trackCtrl } from '../backend/controllers/Controllers'
+import { GuildSession } from '../GuildSession'
+import { Track } from '../backend/entities/Track'
+import { ExtendedTrack } from '../EmbedStateManager'
 
 type PlayOptions = {
-  user: GuildMember
+  session?: GuildSession
+  userId: string
+  guildId: string
   query: string
   force?: boolean
   triggeredByBot?: boolean
   queueInPosition?: number
-  saveToHistory: boolean
   interaction?: any
 }
-// play music using MusicPlayer
+
 export const play = async ({
-  user,
+  session,
+  userId,
   query,
   force = false,
   triggeredByBot = false,
   queueInPosition,
-  saveToHistory,
   interaction,
 }: PlayOptions) => {
   try {
     if (!query) return console.log('##### No query provided for play command.')
 
-    // have bot join voice channel of user who called command
-    const isVoiceConnectionEstablished = await client.ensureVoiceConnection(user, interaction)
-    if (!isVoiceConnectionEstablished) return
+    if (!session || !session.musicPlayer) {
+      interaction && !interaction.replied && interaction.editReply({ content: `Something went wrong!` })
+      return
+    }
 
-    // console.log(formatFramedCommand(`/play ${query}`))
+    const isVoiceConnectionEstablished = await session.ensureVoiceConnection(userId)
+    if (!isVoiceConnectionEstablished) {
+      interaction &&
+        !interaction.replied &&
+        interaction.editReply({ content: `⚠️ You must join a voice channel first!` })
+      return
+    }
+
+    const { musicPlayer } = session
+
     if (force) {
-      await client.musicPlayer?.forcePlay({
-        query,
-        userId: user.id,
-        saveToHistory,
-        interaction,
-      })
+      await musicPlayer.forcePlay({ query, userId, interaction })
     } else {
-      // triggered by bot occurs when hourly music is played
-      if (triggeredByBot && client.musicPlayer?.player.state.status === AudioPlayerStatus.Playing) return
-      await client.musicPlayer?.enqueue({ query, userId: user.id, queueInPosition, saveToHistory, interaction })
+      if (triggeredByBot && musicPlayer.player.state.status === AudioPlayerStatus.Playing) return
+      await musicPlayer.enqueue({ query, userId, queueInPosition, interaction })
     }
   } catch (err) {
-    if (triggeredByBot) {
-      console.error(err)
-    } else {
-      throw err
+    console.error(`Error in play(): ${err}`)
+    if (!triggeredByBot && interaction) {
+      await interaction.followUp({
+        content: 'An error occurred while trying to play music.',
+        ephemeral: true,
+      })
     }
   }
 }
 
 type QueueOptions = {
-  user: GuildMember
+  session: GuildSession
+  userId: string
   query: string | string[]
   interaction?: any
   saveToHistory: boolean
   roulette?: boolean
 }
-export const queue = async ({ user, query, interaction, saveToHistory, roulette = false }: QueueOptions) => {
-  if (!query) return
 
+export const queue = async ({ session, userId, query, interaction }: QueueOptions) => {
   try {
-    const isVoiceConnectionEstablished = await client.ensureVoiceConnection(user, interaction)
-    if (!isVoiceConnectionEstablished) return
+    if (!query || !session || !session.musicPlayer) return
 
-    // Function to handle both single or multiple queries
-    const enqueueVideos = async (queries: string | string[]) => {
-      if (typeof queries === 'string') {
-        queries = [queries]
-      }
-
-      const videos = []
-      for (const query of queries) {
-        const video = (await fetchYoutubeVideosFromUrlOrQuery({
-          urlOrQuery: query,
-          interaction,
-        })) as FormattedYoutubeVideo
-        if (video) videos.push(video)
-      }
-      await client.musicPlayer!.enqueue({
-        videosToQueue: videos,
-        userId: user.id,
-        interaction,
-        saveToHistory,
-        roulette,
-      })
+    const isVoiceConnectionEstablished = await session.ensureVoiceConnection(userId)
+    if (!isVoiceConnectionEstablished) {
+      interaction &&
+        !interaction.replied &&
+        interaction.editReply({ content: `⚠️ You must join a voice channel first!` })
+      return
     }
 
-    await enqueueVideos(query)
+    const videos = []
+    const queries = typeof query === 'string' ? [query] : query
+
+    for (const q of queries) {
+      const video = await fetchYoutubeVideosFromUrlOrQuery({ session, urlOrQuery: q, interaction })
+      if (video && !Array.isArray(video)) videos.push(video)
+    }
+
+    await session.musicPlayer.enqueue({
+      videosToQueue: videos,
+      userId,
+      interaction,
+    })
   } catch (err) {
-    throw err
+    console.error(`Error in queue(): ${err}`)
+    if (interaction) {
+      await interaction.followUp({
+        content: 'An error occurred while queuing videos.',
+        ephemeral: true,
+      })
+    }
   }
 }
 
-export const shuffleQueue = async (userId: string) => {
+export const shuffleQueue = async (session: GuildSession) => {
   try {
-    await client.musicPlayer!.shuffle(userId)
+    if (!session || !session.musicPlayer) return
+    await session.musicPlayer.shuffle()
   } catch (err) {
-    throw err
+    console.error(`Error in shuffleQueue(): ${err}`)
   }
 }
+
 export const removeFromQueue = async ({
+  session,
   start = 1,
   end,
   videoId,
   interaction,
 }: {
+  session: GuildSession
   start?: number
   end?: number
   videoId?: string
   interaction?: any
 }) => {
-  if (videoId) {
-    const index = client.musicPlayer.queue.findIndex((item) => item.video.id === videoId)
-    if (index !== -1) {
-      client.musicPlayer.queue.splice(index, 1)
-    }
-    return interaction && interaction.deleteReply()
-  }
-
-  if (start < 1 || start > client.musicPlayer.queue.length) {
-    return interaction && interaction.deleteReply()
-  }
-
-  const removedItems: QueueItem[] = client.musicPlayer.queue.splice(start - 1, end ? end - start + 1 : 1)
-
-  if (interaction) {
-    const reply = end
-      ? `${removedItems.map((item) => `- [${item.video.title}](${item.video.url})`).join('\n')}`
-      : `- [${removedItems[0].video.title}](${removedItems[0].video.url})`
-
-    await interaction.followUp({
-      embeds: [new EmbedBuilder().setTitle('Removed items:').setDescription(reply)],
-      flags: MessageFlags.Ephemeral,
-    })
-  }
-}
-export const stop = async () => {
   try {
-    if (client.player.state.status === AudioPlayerStatus.Playing) {
-      client.player.stop()
-    } else {
-      await client.musicPlayer!.pause()
+    if (!session || !session.musicPlayer) return
+    const { musicPlayer } = session
+
+    if (videoId) {
+      const index = musicPlayer.queue.findIndex((item) => item.video.id === videoId)
+      if (index !== -1) musicPlayer.queue.splice(index, 1)
+      return interaction?.deleteReply()
+    }
+
+    if (!musicPlayer.queue || start < 1 || start > musicPlayer.queue.length) {
+      return interaction?.deleteReply()
+    }
+
+    const removedItems: QueueItem[] = musicPlayer.queue.splice(start - 1, end ? end - start + 1 : 1)
+
+    if (interaction) {
+      const reply = removedItems.map((item) => `- [${item.video.title}](${item.video.url})`).join('\n')
+      await interaction.followUp({
+        embeds: [new EmbedBuilder().setTitle('Removed items:').setDescription(reply)],
+        flags: MessageFlags.Ephemeral,
+      })
     }
   } catch (err) {
-    throw err
-  }
-}
-export const unpause = async () => {
-  try {
-    if (client.player.state.status === AudioPlayerStatus.Paused) {
-      client.player.unpause()
-    } else {
-      await client.musicPlayer!.unpause()
+    console.error(`Error in removeFromQueue(): ${err}`)
+    if (interaction) {
+      await interaction.followUp({
+        content: 'Failed to remove item(s) from the queue.',
+        ephemeral: true,
+      })
     }
-  } catch (err) {
-    throw err
   }
 }
-export const skip = async (userId: string) => {
+
+export const stop = async (session: GuildSession) => {
   try {
-    if (client.player.state.status === AudioPlayerStatus.Playing) {
-      client.player.stop()
-    } else {
-      await client.musicPlayer!.skip(userId)
-    }
+    if (!session || !session.musicPlayer) return
+    await session.musicPlayer?.pause()
   } catch (err) {
-    throw err
+    console.error(`Error in stop(): ${err}`)
   }
 }
-export const roulette = async ({
-  userId,
-  userIdFilter,
+
+export const unpause = async (session: GuildSession) => {
+  try {
+    if (!session || !session.musicPlayer) return
+    await session.musicPlayer.unpause()
+  } catch (err) {
+    console.error(`Error in unpause(): ${err}`)
+  }
+}
+
+export const skip = async (session: GuildSession, userId: string) => {
+  try {
+    if (!session || !session.musicPlayer) return
+    await session.musicPlayer.skip(userId)
+  } catch (err) {
+    console.error(`Error in skip(): ${err}`)
+  }
+}
+
+export const getRandomVideos = async ({
   count = 1,
 }: {
-  userId: string
-  userIdFilter?: string
-  count: number
-}) => {
-  const user = await getGuildMember(userId)
-  const rawBlacklist = fs.readFileSync(path.join(PATH.USER_DATA, `${BOT_USER_ID}/blacklisted_music.json`), 'utf-8')
-  const blacklist = JSON.parse(rawBlacklist)
+  session: GuildSession
+  count?: number
+}): Promise<ExtendedTrack[]> => {
+  try {
+    const allTracks = await trackCtrl.getAllNonBlacklisted()
+    const selectedTracks = pickRandomItemsFromList(allTracks, count)
 
-  const userMusicHistory = getUserMusicHistory(userIdFilter || BOT_USER_ID)
-  let youtubeUrls = getRandomKeys(userMusicHistory)
-    .filter((videoId) => !blacklist.includes(videoId))
-    .map((videoId) => userMusicHistory[videoId].url || createYoutubeUrlFromId(videoId))
+    const results: ExtendedTrack[] = []
 
-  youtubeUrls = shuffle([...new Set(youtubeUrls)]).slice(0, Math.min(count, 50))
+    for (const track of selectedTracks) {
+      if (track.title && track.duration && track.liveBroadcastContent) {
+        results.push(track)
+      }
+    }
 
-  await queue({
-    user,
-    query: youtubeUrls,
-    saveToHistory: false,
-    roulette: true,
-  })
-}
-
-export const getRandomVideo = async (): Promise<FormattedYoutubeVideo> => {
-  const rawBlacklist = fs.readFileSync(path.join(PATH.USER_DATA, `${BOT_USER_ID}/blacklisted_music.json`), 'utf-8')
-  const blacklist = JSON.parse(rawBlacklist)
-
-  const videoHistory = getUserMusicHistory(BOT_USER_ID)
-  let youtubeUrls = getRandomKeys(videoHistory)
-    .filter((videoId) => !blacklist.includes(videoId))
-    .map((videoId) => videoHistory[videoId].url || createYoutubeUrlFromId(videoId))
-
-  const url = shuffle([...new Set(youtubeUrls)])[0]
-  const video = (await fetchYoutubeVideosFromUrlOrQuery({
-    urlOrQuery: url,
-  })) as FormattedYoutubeVideo
-
-  return video
+    return results
+  } catch (err) {
+    console.error(`Error in getRandomVideos(): ${err}`)
+    return []
+  }
 }

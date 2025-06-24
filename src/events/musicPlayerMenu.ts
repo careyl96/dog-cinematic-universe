@@ -9,37 +9,20 @@ import {
   MessageFlags,
   ModalBuilder,
   StringSelectMenuBuilder,
-  StringSelectMenuOptionBuilder,
   TextInputBuilder,
   TextInputStyle,
 } from 'discord.js'
 import { ClientWithCommands } from '../ClientWithCommands'
 import { createCustomEmbed } from '../helpers/embedHelpers'
-import {
-  escapeDiscordMarkdown,
-  isoToTimestamp,
-  sanitizeFilename,
-  timestampToISO,
-  truncateText,
-} from '../helpers/formatterHelpers'
-import { getGuildMember } from '../helpers/otherHelpers'
+import { escapeDiscordMarkdown, isoToTimestamp, timestampToISO, truncateText } from '../helpers/formatterHelpers'
 import { queue } from '../helpers/playerFunctions'
-import {
-  FormattedYoutubeVideo,
-  extractYouTubeIdFromUrl,
-  uncompressYoutubeVideo,
-} from '../helpers/youtubeHelpers/youtubeFormatterHelpers'
-import {
-  getAllPlaylistsForUser,
-  createPlaylistSelectMenu,
-  deletePlaylistForUserByPlaylistId,
-  getPlaylistForUserById,
-  updatePlaylistForUserById,
-  createNewPlaylist,
-  createTrackSelectMenu,
-} from '../helpers/playlistHelpers'
-import { playlistManager } from '..'
-import { BOT_USER_ID } from '../constants'
+import { extractYouTubeIdFromUrl, uncompressTrack } from '../helpers/youtubeHelpers/youtubeFormatterHelpers'
+import { createPlaylistSelectMenu, createTrackSelectMenu } from '../helpers/playlistHelpers'
+import { client } from '..'
+import { playlistCtrl, trackCtrl } from '../backend/controllers/Controllers'
+import { GuildSession } from '../GuildSession'
+import { ensureVoiceConnectionOrReply } from '../helpers/voiceConnectionHelpers'
+import { FormattedYoutubeVideo } from '../helpers/youtubeHelpers/youtubeHelpers'
 
 const PLAYLIST = {
   MAIN_MENU: 'main_menu',
@@ -64,15 +47,12 @@ const PLAYLIST = {
   ADD_TRACK_PUBLIC_CONFIRM: 'playlist:add:track:public:confirm',
 
   REMOVE_TRACK_CONFIRM: 'playlist:track:remove',
-  REMOVE_TRACK_SELECT: 'playlist:track:remove:select',
   REMOVE_TRACK_CLEAR: 'playlist:track:remove:clear',
 
-  QUEUE_TRACK: 'playlist:queue',
+  TRACK_SELECT: 'playlist:track:select',
   QUEUE_TRACK_CONFIRM: 'playlist:queue:confirm',
 
   SELECTION_CLEAR: 'playlist:track:selection:clear',
-
-  MULTI_SELECT: 'multi-select',
 }
 
 // returns user to main menu
@@ -85,27 +65,32 @@ const backButton = new ButtonBuilder()
 export default {
   name: Events.InteractionCreate,
   once: false,
-  async execute(client: ClientWithCommands, interaction: Interaction) {
+  async execute(client: ClientWithCommands, session: GuildSession, interaction: Interaction) {
     console.log(interaction.customId)
+    if (!session || !session.musicPlayer) return
+
     const userId = interaction.user.id
-    const userPlaylists = getAllPlaylistsForUser(userId)
-    const publicPlaylists = getAllPlaylistsForUser(BOT_USER_ID)
+    const guildId = session.guild.id
+    const musicPlayer = session.musicPlayer
+
+    let state = session.getUserState(userId)
+    const userPlaylists = await playlistCtrl.getByUserId(userId)
+    const publicPlaylists = await playlistCtrl.getPublicByGuildId(guildId)
+
     if (interaction.isButton()) {
       const playlistOptions = [{ name: '🌱 - Create new playlist', customId: PLAYLIST.CREATE }]
 
       if (userPlaylists?.length > 0) {
-        playlistOptions.unshift({ name: '📁 - View playlists', customId: 'playlist:list:update' })
+        playlistOptions.unshift({ name: '📁 - View playlists', customId: PLAYLIST.LIST_UPDATE })
         playlistOptions.push({ name: '🗑️ - Delete Playlist', customId: PLAYLIST.DELETE })
       }
 
       switch (interaction.customId) {
-        // no changes necessary
         case PLAYLIST.MAIN_MENU:
         case PLAYLIST.MAIN_MENU_UPDATE: {
-          playlistManager.getUserState(userId)?.collector?.stop()
-          const content = playlistManager.getUserState(userId).text
+          state?.cleanup()
           await interaction.update({
-            content,
+            content: state.textContent,
             embeds: [],
             components: playlistOptions.map(({ name, customId }) =>
               new ActionRowBuilder<ButtonBuilder>().addComponents(
@@ -113,13 +98,12 @@ export default {
               )
             ),
           })
-          playlistManager.setUserState(userId, { text: '' })
           break
         }
 
         case PLAYLIST.LIST:
         case PLAYLIST.LIST_UPDATE: {
-          playlistManager.getUserState(userId)?.collector?.stop()
+          state?.cleanup()
           const publicPlaylistSelectMenu = createPlaylistSelectMenu({
             playlists: publicPlaylists,
             customId: PLAYLIST.VIEW_PUBLIC,
@@ -144,7 +128,7 @@ export default {
             .setStyle(ButtonStyle.Secondary)
           const navigationRow = new ActionRowBuilder<ButtonBuilder>().addComponents(menuButton, createNewPlaylistButton)
 
-          const content = playlistManager.getUserState(userId).text
+          const content = state.textContent
           const response: any = {
             content,
             embeds: [],
@@ -156,20 +140,18 @@ export default {
           } else {
             await interaction.reply({ ...response, flags: MessageFlags.Ephemeral })
           }
-          playlistManager.setUserState(userId, { text: '' })
+          state.textContent = ''
           break
         }
 
         case PLAYLIST.VIEW_PUBLIC:
-        case PLAYLIST.VIEW: {
-          const isPublic = interaction.customId === PLAYLIST.VIEW_PUBLIC
+        case PLAYLIST.VIEW:
           await renderPlaylistView({
+            session,
             interaction,
-            playlistId: playlistManager.getUserState(userId).playlistId,
-            isPublic,
+            playlistId: state.playlist.id,
           })
           break
-        }
 
         case PLAYLIST.CREATE_FROM_TRACK:
         case PLAYLIST.CREATE: {
@@ -177,7 +159,7 @@ export default {
           if (interaction.customId === PLAYLIST.CREATE_FROM_TRACK) {
             customId = PLAYLIST.CREATE_FROM_TRACK_CONFIRM
           } else {
-            playlistManager.setUserState(userId, { video: null })
+            state.selectedVideo = null
             customId = PLAYLIST.CREATE_CONFIRM
           }
           const modal = new ModalBuilder().setCustomId(customId).setTitle('Create New Playlist')
@@ -207,35 +189,34 @@ export default {
         }
 
         case PLAYLIST.DELETE: {
+          const deletablePlaylists = userPlaylists.filter((playlist) => playlist.deletable === true)
           const selectMenu = createPlaylistSelectMenu({
-            playlists: userPlaylists,
+            playlists: deletablePlaylists,
             customId: PLAYLIST.DELETE_SELECT,
             placeholderText: `🗑️ Select playlist(s) to delete`,
             multiselect: true,
           })
           const navigationRow = new ActionRowBuilder<ButtonBuilder>().addComponents(backButton)
 
-          const content = playlistManager.getUserState(userId).text
+          const content = state.textContent
           await interaction.update({
             content,
             embeds: [],
             components: [selectMenu, navigationRow],
           })
-          playlistManager.setUserState(userId, { text: '' })
+          state.textContent = ''
           break
         }
         case PLAYLIST.DELETE_CONFIRM: {
           try {
             const navigationRow = new ActionRowBuilder<ButtonBuilder>().addComponents(backButton)
-            const deletedPlaylists = await deletePlaylistForUserByPlaylistId(
-              userId,
-              playlistManager.getUserState(userId).selectedPlaylistIds
-            )
-            playlistManager.setUserState(userId, { selectedPlaylistIds: [] })
-            let reply = deletedPlaylists.map((name) => `- ${name}`).join('\n')
+            const idsToDelete = state.selectedPlaylistIds.map((id) => parseInt(id, 10))
+            const playlists = await playlistCtrl.delete(idsToDelete)
+            state.playlist.selectedTracks = []
 
+            const deletedPlaylistEmbedText = playlists.map((playlist) => `- ${playlist.name}`).join('\n')
             await interaction.update({
-              embeds: [new EmbedBuilder().setTitle('Removed playlist(s)').setDescription(reply)],
+              embeds: [new EmbedBuilder().setTitle('Removed playlist(s)').setDescription(deletedPlaylistEmbedText)],
               components: [navigationRow],
             })
           } catch (error: any) {
@@ -275,18 +256,14 @@ export default {
             liveBroadcastContent: 'none', //TODO: make dynamic
           }
 
-          playlistManager.setUserState(userId, {
-            video: videoData,
-          })
-
-          const state = playlistManager.getUserState(userId)
+          state.selectedVideo = videoData
           await interaction.reply({
-            content: `Add [${state.video.title}](${state.video.url}) to playlist:`,
+            content: `Add [${state.selectedVideo.title}](${state.selectedVideo.url}) to playlist:`,
             embeds: [],
             components: [publicPlaylistSelectMenu, selectMenu, navigationRow],
-            flags: [MessageFlags.Ephemeral, MessageFlags.SuppressEmbeds],
+            flags: [MessageFlags.Ephemeral],
           })
-          playlistManager.setUserState(userId, { text: '' })
+          state.textContent = ''
 
           const message = await interaction.fetchReply()
           message
@@ -297,24 +274,17 @@ export default {
                 (i.customId === PLAYLIST.ADD_TRACK_CONFIRM || i.customId === PLAYLIST.ADD_TRACK_PUBLIC_CONFIRM),
             })
             .on('collect', async (selectInteraction: any) => {
-              const isPublic = selectInteraction.customId === PLAYLIST.ADD_TRACK_PUBLIC_CONFIRM
+              const state = session.getUserState(userId)
               const playlistId = selectInteraction.values[0]
-              playlistManager.setUserState(userId, { playlistId })
+              state.playlist.id = playlistId
 
-              const state = playlistManager.getUserState(userId)
+              await playlistCtrl.addTrack(parseInt(playlistId, 10), state.selectedVideo.id)
               try {
-                updatePlaylistForUserById({
-                  userId,
-                  playlistId,
-                  video: state.video,
-                  isPublic,
-                })
-                console.log('rendering playlist after adding track through select menu')
                 await renderPlaylistView({
+                  session,
                   interaction: selectInteraction,
                   playlistId,
-                  newVideo: state.video,
-                  isPublic,
+                  newVideo: state.selectedVideo,
                 })
               } catch (error: any) {
                 await selectInteraction.update({
@@ -331,28 +301,66 @@ export default {
 
         case PLAYLIST.QUEUE_TRACK_CONFIRM: {
           await interaction.deferUpdate()
+          const connected = await ensureVoiceConnectionOrReply(interaction, session, userId, false)
+          if (!connected) break
+
+          const selectedTrackIds = state.playlist.selectedTracks
+          const selectedTracks = (await trackCtrl.getByIds(selectedTrackIds)) as any[]
+
           await queue({
-            user: await getGuildMember(userId),
-            query: playlistManager.getUserState(userId).selectedTracks,
+            session,
+            userId,
+            query: selectedTrackIds,
             saveToHistory: true,
           })
+
+          if (selectedTracks && selectedTracks.length > 0) {
+            const currentQueue = musicPlayer.queue
+            const startIndex =
+              currentQueue.length - selectedTracks.length < 0 ? 0 : currentQueue.length - selectedTracks.length
+
+            const tracksToDisplay = queue.length === 0 ? selectedTracks.slice(1) : selectedTracks
+            const reply = tracksToDisplay
+              .map((track, i) => {
+                const position = startIndex + i + 1
+                return `[${position}] [${truncateText(
+                  escapeDiscordMarkdown(track.title),
+                  45
+                )}](${track.url}) - (${isoToTimestamp(track.duration)}) `
+              })
+              .join('\n')
+
+            await interaction.followUp({
+              embeds: [new EmbedBuilder().setColor(0xffa200).setTitle('Added to the queue:').setDescription(reply)],
+              flags: MessageFlags.Ephemeral,
+            })
+          } else {
+            await interaction.followUp({
+              content: 'No tracks were added. Something went wrong.',
+              flags: MessageFlags.Ephemeral,
+            })
+          }
+
           break
         }
 
         case PLAYLIST.REMOVE_TRACK_CONFIRM: {
-          const state = playlistManager.getUserState(userId)
-          const playlistId = state.playlistId
-          const tracksToDelete = state.selectedTracks
+          await interaction.deferUpdate()
+          const playlistId = state.playlist.id
+          const tracksToDelete = state.playlist.selectedTracks
 
           try {
-            await updatePlaylistForUserById({ userId, playlistId, remove: true, removeUrls: tracksToDelete })
-            playlistManager.setUserState(userId, { selectedTracks: [] })
-          } catch (error: any) {
-            let navigationRow = new ActionRowBuilder<ButtonBuilder>().addComponents(backButton)
-            await interaction.update({
-              content: error?.message,
-              components: [navigationRow],
+            const removedTracks = await playlistCtrl.removeTracks(parseInt(playlistId, 10), tracksToDelete)
+            state.playlist.selectedTracks = []
+            const deletedPlaylistEmbedText = removedTracks
+              .map((playlistTrack) => `- ${playlistTrack.track.title}`)
+              .join('\n')
+            await interaction.followUp({
+              embeds: [new EmbedBuilder().setTitle('Removed track(s)').setDescription(deletedPlaylistEmbedText)],
+              flags: MessageFlags.Ephemeral,
             })
+          } catch (error: any) {
+            console.error('ERROR', error)
           }
           break
         }
@@ -376,18 +384,18 @@ export default {
         case PLAYLIST.VIEW_PUBLIC:
         case PLAYLIST.VIEW: {
           const playlistId = interaction.values[0]
-          playlistManager.setUserState(userId, { playlistId })
+          state.playlist.id = playlistId
           await renderPlaylistView({
+            session,
             interaction,
             playlistId,
-            isPublic: interaction.customId === PLAYLIST.VIEW_PUBLIC,
           })
           break
         }
 
         case PLAYLIST.DELETE_SELECT: {
           const playlistIds = interaction.values
-          const userPlaylists = await getAllPlaylistsForUser(userId)
+          const userPlaylists = await playlistCtrl.getByUserId(userId)
           const selectMenu = createPlaylistSelectMenu({
             playlists: userPlaylists,
             customId: PLAYLIST.DELETE_SELECT,
@@ -397,15 +405,14 @@ export default {
           })
 
           let navigationRow = new ActionRowBuilder<ButtonBuilder>().addComponents(backButton)
-          const playlistIdsToDelete = playlistIds
-          if (playlistIdsToDelete.length > 0) {
+          if (playlistIds.length > 0) {
             const confirmButton = new ButtonBuilder()
               .setCustomId('playlist:delete:confirm')
               .setLabel('🗑️ Delete')
               .setStyle(ButtonStyle.Danger)
             navigationRow = new ActionRowBuilder<ButtonBuilder>().addComponents(backButton, confirmButton)
 
-            playlistManager.setUserState(userId, { selectedPlaylistIds: playlistIdsToDelete })
+            state.selectedPlaylistIds = playlistIds
           }
 
           await interaction.update({
@@ -416,10 +423,11 @@ export default {
         }
 
         // generic multiselect
-        case PLAYLIST.MULTI_SELECT:
-          playlistManager.setUserState(userId, { selectedTracks: interaction.values })
+        case PLAYLIST.TRACK_SELECT: {
+          state.playlist.selectedTracks = interaction.values
           await interaction.deferUpdate()
           break
+        }
       }
     }
 
@@ -433,22 +441,21 @@ export default {
           const isPublic = publicInputField.toLowerCase() === 'y' ? true : false
 
           try {
-            const playlistUserId = await createNewPlaylist({
-              userId,
-              name: newPlaylistNameInputField,
-              isPublic,
-            })
+            const newPlaylist = isPublic
+              ? await playlistCtrl.createPublic({
+                  name: newPlaylistNameInputField,
+                  userId,
+                  guildId,
+                })
+              : await playlistCtrl.create({
+                  userId,
+                  name: newPlaylistNameInputField,
+                })
             if (interaction.customId === PLAYLIST.CREATE_FROM_TRACK_CONFIRM) {
-              await updatePlaylistForUserById({
-                userId: playlistUserId,
-                playlistId: sanitizeFilename(newPlaylistNameInputField),
-                video: playlistManager.getUserState(userId).video,
-              })
+              await playlistCtrl.addTrack(newPlaylist.id, state.selectedVideo.id)
             }
 
-            playlistManager.setUserState(userId, {
-              playlistId: sanitizeFilename(newPlaylistNameInputField),
-            })
+            state.playlist.id = newPlaylist.id.toString()
             await interaction.reply({
               content: `"${newPlaylistNameInputField}" created successfully`,
               components: [
@@ -474,155 +481,268 @@ export default {
   },
 }
 
-// reasoning behind putting all of the collectors and conditional rendering logic within the renderPlaylistFunction
-// is that it's impossible to update the ephemeral interaction (menu) otherwise
-const renderPlaylistView = async ({
+// Collectors and conditional rendering logic must be within the renderPlaylistFunction
+// because it's impossible to update the ephemeral message (menu) otherwise
+export const renderPlaylistView = async ({
+  session,
   interaction,
   playlistId,
   newVideo,
-  isPublic = false,
   textContent = '',
+  reply = false,
 }: {
+  session: GuildSession
   interaction: any
   playlistId: string
   newVideo?: FormattedYoutubeVideo
-  isPublic?: boolean
   textContent?: string
+  reply?: boolean
 }) => {
+  if (newVideo && newVideo.title && newVideo.url) {
+    textContent = `Added [${newVideo.title}](${newVideo.url}) to the playlist!`
+  }
+
   const userId = interaction.user.id
-  let playlistJSON = isPublic
-    ? getPlaylistForUserById(BOT_USER_ID, playlistId)
-    : getPlaylistForUserById(userId, playlistId)
-  let videos = Object.values(playlistJSON.videos).map(uncompressYoutubeVideo)
+  const state = session.getUserState(userId)
+  let playlist = await playlistCtrl.getById(parseInt(playlistId, 10))
+
+  let videos = playlist.tracks.map((playlistTrack: any) =>
+    uncompressTrack({
+      id: playlistTrack.track.id,
+      title: playlistTrack.track.title,
+      firstPlayedAt: playlistTrack.track.firstPlayedAt,
+      duration: playlistTrack.track.duration,
+      liveBroadcastContent: playlistTrack.track.liveBroadcastContent,
+    } as any)
+  ) as any[]
 
   const backButton = new ButtonBuilder()
     .setCustomId(PLAYLIST.LIST_UPDATE)
     .setLabel('Back')
     .setEmoji('⬅️')
     .setStyle(ButtonStyle.Secondary)
+
   let navigationRow = new ActionRowBuilder<ButtonBuilder>().addComponents(backButton)
 
   if (videos.length === 0) {
-    await interaction.update({
+    const emptyPayload = {
       content: 'Playlist is empty!',
       components: [navigationRow],
-    })
+      ephemeral: true,
+    }
+
+    try {
+      if (reply) {
+        await interaction.reply(emptyPayload)
+      } else {
+        await interaction.update(emptyPayload)
+      }
+    } catch (error) {
+      console.error('Failed to respond to empty playlist interaction:', error)
+    }
     return
   }
 
   const selectMenu = new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(
     createTrackSelectMenu({
-      customId: PLAYLIST.MULTI_SELECT,
+      customId: PLAYLIST.TRACK_SELECT,
       videos,
       multiselect: true,
     })
   )
 
-  navigationRow = new ActionRowBuilder<ButtonBuilder>().addComponents(backButton)
-
-  let playlistEmbedText = videos
+  const playlistEmbedText = videos
     .map((video, i) => {
-      const title = truncateText(escapeDiscordMarkdown(video.title), 50)
+      const title = truncateText(escapeDiscordMarkdown(video.title), 45)
       const isNew = newVideo && video.id === newVideo.id
       return `[${i + 1}] [${title}](${video.url}) - (${isoToTimestamp(video.duration)}) ${isNew ? ' ⭐️ [NEW]' : ''}`
     })
     .join('\n')
 
-  let playlistViewEmbed = createCustomEmbed({ headerText: `${playlistJSON.name}`, text: playlistEmbedText })
-
-  const message = await interaction.update({
-    content: textContent,
-    embeds: [playlistViewEmbed],
-    components: [selectMenu, navigationRow],
+  const playlistViewEmbed = createCustomEmbed({
+    headerText: `${playlist.name}`,
+    text: playlistEmbedText,
   })
+
+  let message: any
+
+  try {
+    const responsePayload = {
+      content: textContent,
+      embeds: [playlistViewEmbed],
+      components: [selectMenu, navigationRow],
+      ephemeral: true,
+    }
+
+    if (reply) {
+      await interaction.reply(responsePayload)
+      message = await interaction.fetchReply()
+      state.interaction = interaction
+    } else {
+      message = await interaction.update(responsePayload)
+    }
+  } catch (error) {
+    console.error('Failed to respond to interaction:', error)
+    return
+  }
 
   const collector = message.createMessageComponentCollector({
     componentType: ComponentType.StringSelect,
-    filter: (i: any) => i.user.id === interaction.user.id && i.customId === PLAYLIST.MULTI_SELECT,
+    filter: (i: any) => i.user.id === userId && i.customId === PLAYLIST.TRACK_SELECT,
   })
-  playlistManager.setUserState(userId, { collector })
+
   collector.on('collect', async (selectInteraction: any) => {
-    const selectedUrls = selectInteraction.values
-    const updatedMenu = new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(
-      createTrackSelectMenu({
-        customId: PLAYLIST.MULTI_SELECT,
-        videos,
-        defaultValues: selectedUrls,
-        multiselect: true,
-      })
-    )
+    try {
+      const selectedTrackIds = selectInteraction.values
 
-    const queueButton = new ButtonBuilder()
-      .setCustomId(PLAYLIST.QUEUE_TRACK_CONFIRM)
-      .setLabel('✅ Send to queue')
-      .setStyle(ButtonStyle.Success)
-    const removeFromPlaylistButton = new ButtonBuilder()
-      .setCustomId(PLAYLIST.REMOVE_TRACK_CONFIRM)
-      .setLabel('Remove from playlist')
-      .setStyle(ButtonStyle.Danger)
-    const clearButton = new ButtonBuilder()
-      .setCustomId(PLAYLIST.SELECTION_CLEAR)
-      .setLabel('❌ Clear selection')
-      .setStyle(ButtonStyle.Secondary)
+      const updatedMenu = new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(
+        createTrackSelectMenu({
+          customId: PLAYLIST.TRACK_SELECT,
+          videos,
+          defaultValues: selectedTrackIds,
+          multiselect: true,
+        })
+      )
 
-    const navigationRow = new ActionRowBuilder<ButtonBuilder>().addComponents(
-      backButton,
-      queueButton,
-      removeFromPlaylistButton,
-      clearButton
-    )
+      const queueButton = new ButtonBuilder()
+        .setCustomId(PLAYLIST.QUEUE_TRACK_CONFIRM)
+        .setLabel('✅ Send to queue')
+        .setStyle(ButtonStyle.Success)
 
-    await message.edit({
-      embeds: [playlistViewEmbed],
-      components: [updatedMenu, navigationRow],
-    })
+      const removeButton = new ButtonBuilder()
+        .setCustomId(PLAYLIST.REMOVE_TRACK_CONFIRM)
+        .setLabel('Remove from playlist')
+        .setStyle(ButtonStyle.Danger)
+
+      const clearButton = new ButtonBuilder()
+        .setCustomId(PLAYLIST.SELECTION_CLEAR)
+        .setLabel('❌ Clear selection')
+        .setStyle(ButtonStyle.Secondary)
+
+      const navRow = new ActionRowBuilder<ButtonBuilder>().addComponents(
+        backButton,
+        queueButton,
+        removeButton,
+        clearButton
+      )
+
+      if (reply) {
+        const replyInteraction = state.interaction
+        await replyInteraction.editReply({
+          embeds: [playlistViewEmbed],
+          components: [updatedMenu, navRow],
+        })
+      } else {
+        await message.edit({
+          embeds: [playlistViewEmbed],
+          components: [updatedMenu, navRow],
+        })
+      }
+
+      state.textContent = selectInteraction.message.content
+      state.playlist.id = playlistId
+    } catch (error) {
+      console.error('Error handling select menu collect event:', error)
+      try {
+        await selectInteraction.followUp({ content: 'An error occurred. Please try again.', ephemeral: true })
+      } catch {}
+    }
   })
 
   const collector2 = message.createMessageComponentCollector({
     componentType: ComponentType.Button,
     filter: (i: any) =>
-      i.user.id === interaction.user.id &&
-      (i.customId === PLAYLIST.SELECTION_CLEAR ||
-        i.customId === PLAYLIST.QUEUE_TRACK_CONFIRM ||
-        i.customId === PLAYLIST.REMOVE_TRACK_CONFIRM),
+      i.user.id === userId &&
+      [PLAYLIST.SELECTION_CLEAR, PLAYLIST.QUEUE_TRACK_CONFIRM, PLAYLIST.REMOVE_TRACK_CONFIRM].includes(i.customId),
   })
 
-  collector2.on('collect', async () => {
-    playlistJSON = getPlaylistForUserById(userId, playlistManager.getUserState(userId).playlistId)
-    videos = Object.values(playlistJSON.videos).map(uncompressYoutubeVideo)
-    if (videos.length === 0) {
-      let navigationRow = new ActionRowBuilder<ButtonBuilder>().addComponents(backButton)
-      await interaction.update({
-        content: 'Playlist is empty!',
-        components: [navigationRow],
+  state.playlist = {
+    collectors: [collector, collector2],
+    id: playlistId,
+  }
+
+  collector2.on('collect', async (buttonInteraction: any) => {
+    try {
+      const session = client.guildSessions.get(buttonInteraction.guildId)
+      const connected = await ensureVoiceConnectionOrReply(buttonInteraction, session, userId, true)
+      if (!connected) return
+
+      playlist = await playlistCtrl.getById(parseInt(state.playlist.id, 10))
+
+      const updatedVideos = playlist.tracks.map((playlistTrack) =>
+        uncompressTrack({
+          id: playlistTrack.track.id,
+          title: playlistTrack.track.title,
+          duration: playlistTrack.track.duration,
+          liveBroadcastContent: playlistTrack.track.liveBroadcastContent,
+        })
+      )
+
+      if (updatedVideos.length === 0) {
+        const navRow = new ActionRowBuilder<ButtonBuilder>().addComponents(backButton)
+
+        if (reply) {
+          const replyInteraction = state.interaction
+          await replyInteraction.editReply({
+            content: 'Playlist is empty!',
+            components: [navRow],
+            embeds: [],
+          })
+        } else {
+          await message.edit({
+            content: 'Playlist is empty!',
+            components: [navRow],
+            embeds: [],
+          })
+        }
+        return
+      }
+
+      const updatedText = updatedVideos
+        .map((video, i) => {
+          const title = truncateText(escapeDiscordMarkdown(video.title), 45)
+          const isNew = newVideo && video.id === newVideo.id
+          return `[${i + 1}] [${title}](${video.url})${isNew ? ' ⭐️ [NEW]' : ''}`
+        })
+        .join('\n')
+
+      const updatedEmbed = createCustomEmbed({
+        headerText: `${playlist.name}`,
+        text: updatedText,
       })
-      return
+
+      const updatedMenu = new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(
+        createTrackSelectMenu({
+          customId: PLAYLIST.TRACK_SELECT,
+          videos: updatedVideos as any,
+          multiselect: true,
+        })
+      )
+
+      const navRow = new ActionRowBuilder<ButtonBuilder>().addComponents(backButton)
+
+      const content = state.textContent
+      if (reply) {
+        const replyInteraction = state.interaction
+        await replyInteraction.editReply({
+          content,
+          embeds: [updatedEmbed],
+          components: [updatedMenu, navRow],
+        })
+      } else {
+        await message.edit({
+          content,
+          embeds: [updatedEmbed],
+          components: [updatedMenu, navRow],
+        })
+      }
+
+      state.textContent = ''
+    } catch (error) {
+      console.error('Error handling button collect event:', error)
+      try {
+        await buttonInteraction.followUp({ content: 'An error occurred. Please try again.', ephemeral: true })
+      } catch {}
     }
-
-    playlistEmbedText = videos
-      .map((video, i) => {
-        const title = truncateText(escapeDiscordMarkdown(video.title), 50)
-        const isNew = newVideo && video.id === newVideo.id
-        return `[${i + 1}] [${title}](${video.url})${isNew ? ' ⭐️ [NEW]' : ''}`
-      })
-      .join('\n')
-    playlistViewEmbed = createCustomEmbed({ headerText: `${playlistJSON.name}`, text: playlistEmbedText })
-    const updatedMenu = new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(
-      createTrackSelectMenu({
-        customId: PLAYLIST.MULTI_SELECT,
-        videos,
-        multiselect: true,
-      })
-    )
-
-    const navigationRow = new ActionRowBuilder<ButtonBuilder>().addComponents(backButton)
-
-    const content = playlistManager.getUserState(userId).text
-    await message.edit({
-      content,
-      embeds: [playlistViewEmbed],
-      components: [updatedMenu, navigationRow],
-    })
-    playlistManager.setUserState(userId, { text: '' })
   })
 }

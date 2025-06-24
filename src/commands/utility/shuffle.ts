@@ -1,5 +1,6 @@
 import { InteractionContextType, SlashCommandBuilder } from 'discord.js'
 import { shuffleQueue } from '../../helpers/playerFunctions'
+import { client } from '../..'
 
 export default {
   data: new SlashCommandBuilder()
@@ -7,6 +8,7 @@ export default {
     .setDescription('Shuffles the queue')
     .setContexts(InteractionContextType.Guild),
   async execute(interaction: any) {
-    await shuffleQueue(interaction.user.id)
+    const session = client.guildSessions.get(interaction.guildId)
+    await shuffleQueue(session, interaction.user.id)
   },
 }
