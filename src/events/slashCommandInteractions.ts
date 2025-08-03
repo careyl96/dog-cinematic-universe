@@ -50,13 +50,14 @@ export default {
 
       const replyPayload = createErrorEmbed({
         errorMessage,
-        flags: MessageFlags.Ephemeral,
       }) as any
 
       if (interaction.replied || interaction.deferred) {
-        await interaction.followUp(replyPayload)
+        interaction.deleteReply()
+        await session.musicBotTextChannel.send(replyPayload)
       } else {
-        await interaction.reply(replyPayload)
+        console.log(replyPayload)
+        // await interaction.reply(replyPayload)
       }
     }
   },

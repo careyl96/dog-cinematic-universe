@@ -19,7 +19,9 @@ export const fetchViaYTS = async ({
   }
 
   const response = await yts(query)
-  if (!response?.all?.length) throw new Error('No search results found')
+  if (!response?.all?.length) { 
+    throw new Error(`There was a problem getting a search result for query: ${query}`)
+  }
   const videoResults = response.all.filter((result) => result.type === 'video' || result.type === 'live')
   return formatYTSFromQuerySearch(videoResults[0])
 }

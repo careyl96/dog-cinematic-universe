@@ -13,7 +13,8 @@ import FormData from 'form-data'
 import https from 'https'
 import axios from 'axios'
 import dotenv from 'dotenv'
-import { client } from '../..'
+import { session } from '../..'
+import { GuildSession } from '../../GuildSession'
 
 dotenv.config()
 ffmpeg.setFfmpegPath(ffmpegPath!)
@@ -44,10 +45,10 @@ export const parseCommandWordAndQuery = (words: string[], commands: string[]): [
 }
 
 // transcodes discord voice input to text and checks for voice commands
-export const transcodeUserVoiceInput = async (client: ClientWithCommands, user: GuildMember) => {
+export const transcodeUserVoiceInput = async (session: GuildSession, user: GuildMember) => {
   // prevent creation of unnecessary extra streams
-  if (client.activeSpeakers.has(user.id)) return
-  client.activeSpeakers.add(user.id)
+  if (session.activeSpeakers.has(user.id)) return
+  session.activeSpeakers.add(user.id)
 
   try {
     const userIdAndName = `${user.id}_${user.displayName}`
@@ -58,15 +59,18 @@ export const transcodeUserVoiceInput = async (client: ClientWithCommands, user: 
 
     // https://discord.js.org/docs/packages/voice/main/VoiceReceiver:Class#subscribe
     // receiver.subscribe returns raw discord audio output as readable stream of Opus packets
-    const readStream = client.connection!.receiver.subscribe(user.id, {
+    const readStream = session.connection!.receiver.subscribe(user.id, {
       end: {
         behavior: EndBehaviorType.AfterSilence,
         duration: 1.5 * 1000,
       },
     })
     readStream
+      .on('data', (data) => {
+        console.log(data)
+      })
       .once('end', () => {
-        client.activeSpeakers.delete(user.id)
+        session.activeSpeakers.delete(user.id)
       })
       .on('error', (err) => {
         console.error(err)
@@ -96,7 +100,7 @@ export const transcodeUserVoiceInput = async (client: ClientWithCommands, user: 
     return responseText
     // ignore common hallucinations from faster-whisper based models
   } catch (err: any) {
-    client.activeSpeakers.delete(user.id)
+    session.activeSpeakers.delete(user.id)
     console.error(err)
   }
 }
@@ -163,7 +167,7 @@ export const transcribeAudioWithWhisper = async (audioFilePath: string): Promise
     })
   } catch (err: any) {
     console.error(err.message)
-    await client.setVoiceCommands(false)
+    await session.setVoiceCommands(false)
     unlink(audioFilePath, (err) => {
       if (err) console.error(err)
     })
@@ -191,7 +195,7 @@ export const fetchModels = async () => {
     return models.data.data
   } catch (err: any) {
     console.error(err.message)
-    await client.setVoiceCommands(false)
+    await session.setVoiceCommands(false)
   }
 }
 

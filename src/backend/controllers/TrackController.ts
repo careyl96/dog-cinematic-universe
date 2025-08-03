@@ -1,17 +1,22 @@
 import { EntityManager, In } from 'typeorm'
 import { Track } from '../entities/Track'
+import { GuildTrackProfile } from '../entities/GuildTrackProfile'
 import { BaseController } from './BaseController'
-import { UncompressedTrack, uncompressTrack } from '../../helpers/youtubeHelpers/youtubeFormatterHelpers'
+import { uncompressTrack } from '../../helpers/youtubeHelpers/youtubeFormatterHelpers'
 import { BOT_USER_ID } from '../../constants'
 import { FormattedYoutubeVideo } from '../../helpers/youtubeHelpers/youtubeHelpers'
 import { ExtendedTrack } from '../../EmbedManager'
+import { guildCtrl } from './Controllers'
 
 export class TrackController extends BaseController<Track> {
+  private profileRepo
+
   constructor(manager?: EntityManager) {
     super(Track, manager)
+    this.profileRepo = this.repo.manager.getRepository(GuildTrackProfile)
   }
 
-  async upsert(trackData: Partial<Track>): Promise<Track> {
+  async upsert(trackData: Partial<Track> & Partial<GuildTrackProfile>, guildId?: string): Promise<ExtendedTrack> {
     const { id } = trackData
     if (!id) {
       throw new Error('Must provide id to upsert a Track')
@@ -19,108 +24,192 @@ export class TrackController extends BaseController<Track> {
 
     const existing = await this.repo.findOneBy({ id })
 
+    let track: Track
     if (existing) {
       const merged = this.repo.merge(existing, trackData)
-      return this.repo.save(merged) // no need to await here
+      track = await this.repo.save(merged)
+    } else {
+      const newTrack = this.repo.create(trackData)
+      track = await this.repo.save(newTrack)
     }
 
-    const newTrack = this.repo.create(trackData)
-    return this.repo.save(newTrack)
+    let profile
+    if (guildId) {
+      profile = await this.profileRepo.findOneBy({ guildId, trackId: id })
+
+      if (profile) {
+        profile.userPlayCount = trackData.userPlayCount ? trackData.userPlayCount : (profile.userPlayCount ?? 0)
+        profile.blacklisted = trackData.blacklisted ?? profile.blacklisted
+        profile.firstPlayedBy = profile.firstPlayedBy || trackData.firstPlayedBy
+        profile.lastPlayedAt = trackData.lastPlayedAt ?? profile.lastPlayedAt
+        profile.volume = trackData.volume ?? profile.volume
+        profile = await this.profileRepo.save(profile)
+      } else {
+        profile = this.profileRepo.create({
+          guildId,
+          trackId: id,
+          userPlayCount: trackData.userPlayCount ?? 0,
+          blacklisted: trackData.blacklisted ?? false,
+          firstPlayedBy: trackData.firstPlayedBy,
+          lastPlayedAt: trackData.lastPlayedAt,
+          volume: trackData.volume,
+        })
+        profile = await this.profileRepo.save(profile)
+      }
+    }
+    return this.formatTrack(track, profile)
   }
 
-  async ensureTrackCompleteOrUpsert(
-    trackData: UncompressedTrack | FormattedYoutubeVideo,
-    userId: string
+  async ensureValidTrackDataOrUpsert(
+    trackData: ExtendedTrack | FormattedYoutubeVideo,
+    userId: string,
+    guildId: string
   ): Promise<ExtendedTrack> {
     if (!trackData.id) throw new Error('Track data must have an id')
 
-    const track = await this.getById(trackData.id)
-    const isMissingFields =
-      !track || !track.title || !track.duration || !track.liveBroadcastContent || !track.firstPlayedBy
+    const existingTrack = await this.getById(trackData.id, guildId)
 
-    if (isMissingFields) {
-      const updatedTrackData: Partial<Track> = {
-        ...trackData,
+    const needsUpdate =
+      !existingTrack ||
+      !existingTrack.title ||
+      !existingTrack.duration ||
+      !existingTrack.liveBroadcastContent ||
+      !existingTrack.firstPlayedBy
+
+    if (needsUpdate) {
+      const upsertData: Partial<Track> & Partial<GuildTrackProfile> = { ...trackData }
+      if ((!existingTrack || !existingTrack.firstPlayedBy) && userId !== BOT_USER_ID) {
+        upsertData.firstPlayedBy = userId
       }
 
-      // Only set firstPlayedBy if not set and userId is NOT the bot user
-      if ((!track || !track.firstPlayedBy) && userId !== BOT_USER_ID) {
-        updatedTrackData.firstPlayedBy = userId
-      }
-
-      const upsertedTrack = await this.upsert(updatedTrackData)
-      return this.formatTrack(upsertedTrack)
+      return await this.upsert(upsertData, guildId)
     }
 
-    return uncompressTrack(track)
+    return existingTrack
   }
 
-  getAll(): Promise<Track[]> {
+  async getAll(): Promise<Track[]> {
     return this.repo.find()
   }
 
-  async getAllNonBlacklisted(): Promise<UncompressedTrack[]> {
-    const tracks = await this.repo.find({
-      where: { blacklisted: false },
-    })
+  async getAllNonBlacklisted(guildId: string): Promise<ExtendedTrack[]> {
+    const tracks = await this.repo
+      .createQueryBuilder('track')
+      .innerJoinAndSelect(
+        'track.guildTrackProfiles',
+        'profile',
+        'profile.guildId = :guildId AND profile.blacklisted = false',
+        { guildId }
+      )
+      .getMany()
 
-    return tracks.map((track) => this.formatTrack(track) as any)
+    return tracks.map((track) => this.formatTrack(this.mergeTrackAndProfile(track)))
   }
 
-  getById(id: string): Promise<Track | null> {
-    return this.repo.findOneBy({ id })
-  }
+  private async fetchTracksWithProfiles(ids: string[], guildId: string): Promise<Track[]> {
+    // Fetch all tracks
+    const tracks = await this.repo.findBy({ id: In(ids) })
+    if (!tracks.length) return []
 
-  async getByIds(ids: string[]): Promise<ExtendedTrack[]> {
-    const tracks = await this.repo.findBy({
-      id: In(ids),
+    // Fetch profiles for these tracks and guild
+    const profiles = await this.profileRepo.findBy({
+      guildId,
+      trackId: In(tracks.map((t) => t.id)),
     })
 
-    // Sort the fetched tracks based on the order of IDs in the input array
+    const profileMap = new Map<string, GuildTrackProfile>()
+    for (const profile of profiles) {
+      profileMap.set(profile.trackId, profile)
+    }
+
+    // Find missing profiles
+    const tracksMissingProfiles = tracks.filter((track) => !profileMap.has(track.id))
+
+    if (tracksMissingProfiles.length) {
+      const newProfiles = tracksMissingProfiles.map((track) =>
+        this.profileRepo.create({
+          guildId,
+          trackId: track.id,
+          userPlayCount: 0,
+          blacklisted: false,
+        })
+      )
+      await this.profileRepo.save(newProfiles)
+
+      // Add newly created profiles to the map
+      for (const profile of newProfiles) {
+        profileMap.set(profile.trackId, profile)
+      }
+    }
+
+    // Attach profiles to the tracks
+    return tracks.map((track) => {
+      track.guildTrackProfiles = [profileMap.get(track.id)!] // guaranteed to exist now
+      return track
+    })
+  }
+
+  private mergeTrackAndProfile(track: Track | ExtendedTrack): Partial<Track> & Partial<GuildTrackProfile> {
+    const profile = track.guildTrackProfiles?.[0]
+    return profile ? { ...track, ...profile } : track
+  }
+
+  async getById(id: string, guildId?: string): Promise<ExtendedTrack | null> {
+    let track: Track | undefined
+
+    if (guildId) {
+      ;[track] = await this.fetchTracksWithProfiles([id], guildId)
+      return track ? this.formatTrack(this.mergeTrackAndProfile(track)) : null
+    }
+
+    track = await this.repo.findOne({ where: { id } })
+
+    return track ? this.formatTrack(track) : null
+  }
+
+  async getByIds(ids: string[], guildId: string): Promise<ExtendedTrack[]> {
+    const tracks = await this.fetchTracksWithProfiles(ids, guildId)
     const trackMap = new Map(tracks.map((track) => [track.id, track]))
-    const sortedTracks = ids.map((id) => trackMap.get(id)).filter((track): track is Track => !!track)
 
-    return sortedTracks.map((track) => this.formatTrack(track)) as any
+    return ids
+      .map((id) => {
+        const track = trackMap.get(id)
+        return track ? this.formatTrack(this.mergeTrackAndProfile(track)) : null
+      })
+      .filter((t): t is ExtendedTrack => !!t)
   }
 
-  async getByIdAndFormat(id: string): Promise<UncompressedTrack | null> {
-    const track = await this.repo.findOneBy({ id })
+  async getByIdAndFormat(id: string, guildId: string): Promise<ExtendedTrack | null> {
+    return this.getById(id, guildId)
+  }
 
-    if (!track || !track.title || !track.duration || !track.liveBroadcastContent) {
-      return null
+  async blacklistById(trackId: string, guildId: string): Promise<void> {
+    // Ensure the track and guild exist
+    await this.repo.findOneByOrFail({ id: trackId })
+    await guildCtrl.findOneByOrFail({ id: guildId })
+
+    let profile = await this.profileRepo.findOneBy({ guildId, trackId })
+    if (!profile) {
+      profile = this.profileRepo.create({ guildId, trackId, blacklisted: true })
+    } else {
+      profile.blacklisted = true
     }
 
-    return this.formatTrack(track) as any
+    await this.profileRepo.save(profile)
   }
 
-  async blacklistById(id: string): Promise<Track | null> {
-    const existing = await this.repo.findOneBy({ id })
-
-    if (existing) {
-      existing.blacklisted = true
-      return this.repo.save(existing)
+  async unBlacklistById(guildId: string, trackId: string): Promise<void> {
+    const profile = await this.profileRepo.findOneBy({ guildId, trackId })
+    if (profile) {
+      profile.blacklisted = false
+      await this.profileRepo.save(profile)
     }
-
-    const newTrack = this.repo.create({ id, blacklisted: true })
-    return this.repo.save(newTrack)
   }
 
-  async unBlacklistById(id: string): Promise<Track | null> {
-    const existing = await this.repo.findOneBy({ id })
-
-    if (existing) {
-      existing.blacklisted = false
-      return this.repo.save(existing)
-    }
-
-    const newTrack = this.repo.create({ id, blacklisted: false })
-    return this.repo.save(newTrack)
-  }
-
-  getAllBlacklisted(): Promise<Track[]> {
-    return this.repo.find({
-      where: { blacklisted: true },
-    })
+  async getAllBlacklisted(guildId: string): Promise<Track[]> {
+    const profiles = await this.profileRepo.find({ where: { guildId, blacklisted: true }, select: ['trackId'] })
+    const blacklistedIds = profiles.map((p) => p.trackId)
+    return blacklistedIds.length ? this.repo.findBy({ id: In(blacklistedIds) }) : []
   }
 
   async delete(id: string): Promise<boolean> {
@@ -128,11 +217,17 @@ export class TrackController extends BaseController<Track> {
     return result.affected !== 0
   }
 
-  formatTrack(track: Track): ExtendedTrack {
-    if (!track || !track.title || !track.duration || !track.liveBroadcastContent) {
-      return null
-    }
-
-    return uncompressTrack(track)
+  private formatTrack(track: Partial<Track> & Partial<GuildTrackProfile>, profile?: GuildTrackProfile): ExtendedTrack {
+    return uncompressTrack({
+      id: track.id,
+      title: track.title,
+      duration: track.duration,
+      liveBroadcastContent: track.liveBroadcastContent,
+      userPlayCount: (profile?.userPlayCount || track.userPlayCount) ?? 0,
+      blacklisted: (profile?.blacklisted || track.blacklisted) ?? false,
+      firstPlayedBy: profile?.firstPlayedBy || track.firstPlayedBy,
+      lastPlayedAt: profile?.lastPlayedAt || track.lastPlayedAt,
+      volume: profile?.volume || track.volume,
+    })
   }
 }

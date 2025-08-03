@@ -5,13 +5,14 @@ import { generateProgressBar, isoToTimestamp, msToTimestamp, isoToMs } from './h
 import { Track } from './backend/entities/Track'
 import { handleTrackFinishedTransaction } from './backend/helpers/handleTrackFinishedTransaction'
 import { EMBED_CONTROLS } from './constants'
-import { uncompressTrack } from './helpers/youtubeHelpers/youtubeFormatterHelpers'
 import { TimerManager } from './TimerManager'
+import { GuildTrackProfile } from './backend/entities/GuildTrackProfile'
 
-export type ExtendedTrack = Track & {
-  url: string
-  thumbnail: string
-}
+export type ExtendedTrack = Partial<Track> &
+  Partial<GuildTrackProfile> & {
+    url: string
+    thumbnail: string
+  }
 
 export class EmbedManager {
   session: GuildSession
@@ -54,13 +55,13 @@ export class EmbedManager {
     } catch {}
   }
   public async handleFinished() {
-    const elapsedTime = this.trackTimer.stop()
+    const { startTime, elapsedTime } = this.trackTimer.stop()
     if (!this.skippedByUserId) {
       await handleTrackFinishedTransaction({
         userId: this.userId,
         guildId: this.session.guild.id,
         trackData: this.track,
-        startTimestamp: this.trackTimer.state.startTime,
+        startTimestamp: startTime,
       })
     }
 
@@ -83,10 +84,10 @@ export class EmbedManager {
     embedState?: NowPlayingEmbedState
     elapsedTime?: number
   } = {}) {
-    const trackCompletionPercentage = Math.floor((elapsedTime / isoToMs(track.duration)) * 100) ?? 0
+    const trackCompletionPercentage = Math.floor((elapsedTime / isoToMs(track?.duration)) * 100) ?? 0
     const progressBar = generateProgressBar(trackCompletionPercentage, 10)
     const elapsedTimestamp = msToTimestamp(elapsedTime ?? 0)
-    const trackDuration = isoToTimestamp(track.duration)
+    const trackDuration = isoToTimestamp(track?.duration) || '∞'
 
     let stateString: string
     let color: number
@@ -157,7 +158,9 @@ export class EmbedManager {
     const { embeds, components } = this.createTrackEmbed({ elapsedTime })
 
     this.trackTimer.state.isUpdating = true
-    await this.message.edit({ embeds, components })
+    try {
+      await this.message.edit({ embeds, components })
+    } catch {}
     this.trackTimer.state.isUpdating = false
   }
 

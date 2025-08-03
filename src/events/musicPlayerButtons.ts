@@ -9,7 +9,7 @@ import {
   MessageFlags,
 } from 'discord.js'
 import { ClientWithCommands } from '../ClientWithCommands'
-import { createQueueEmbed, extractVideoDataFromMessage } from '../helpers/embedHelpers'
+import { createQueueEmbed, extractVideoDataFromMessage, NowPlayingEmbedState } from '../helpers/embedHelpers'
 import { EMBED_CONTROLS, UNDO } from '../constants'
 import { escapeDiscordMarkdown, isoToTimestamp, truncateText } from '../helpers/formatterHelpers'
 import { fetchMessages } from '../helpers/otherHelpers'
@@ -29,6 +29,7 @@ export default {
     if (!interaction.isButton() || !session || !session.musicPlayer) return
 
     const userId = interaction.user.id
+    const guildId = session.guild.id
     const message = interaction.message
     const userState = session.getUserState(userId)
 
@@ -83,8 +84,16 @@ export default {
               console.error('Failed to delete current embed message:', error)
             }
             const embedData = prevMessage.embeds[0].data
-            const prevVideo = (await trackCtrl.getByIdAndFormat(extractYouTubeIdFromUrl(embedData.url))) as any
+            const prevVideo = await trackCtrl.getByIdAndFormat(extractYouTubeIdFromUrl(embedData.url), guildId)
 
+            const currentTrack = session.musicPlayer.track
+            if (currentTrack?.id) {
+              const queueItem: QueueItem = {
+                video: currentTrack,
+                userId: embedState.userId,
+              }
+              musicPlayer.queue.unshift(queueItem)
+            }
             musicPlayer.embedManager.message = prevMessage
             await musicPlayer.forcePlay({
               query: prevVideo?.url,
@@ -181,7 +190,7 @@ export default {
       case EMBED_CONTROLS.AUTOPLAY:
         try {
           await interaction.deferUpdate()
-          await musicPlayer.handleAutoplay(!musicPlayer.autoplay)
+          await musicPlayer.setAutoplay(!musicPlayer.autoplay)
         } catch (err) {
           console.error(err)
         }
@@ -190,7 +199,7 @@ export default {
       case EMBED_CONTROLS.ROULETTE:
         try {
           await interaction.deferUpdate()
-          await musicPlayer.handleAutoplay(true)
+          await musicPlayer.setAutoplay(true)
         } catch (err) {
           console.error(err)
         }
@@ -202,6 +211,10 @@ export default {
         if (!connected) break
 
         try {
+          if (musicPlayer.player.state.status === AudioPlayerStatus.Paused) {
+            const { elapsedTime } = musicPlayer.embedManager.trackTimer.stop()
+            await musicPlayer.embedManager.updateEmbed(NowPlayingEmbedState.Skipped, elapsedTime)
+          }
           musicPlayer.embedManager.message = message
           await musicPlayer.forcePlay({
             query: videoData.url,
@@ -228,56 +241,29 @@ const handleViewQueue = async ({
   userId: string
 }) => {
   const ITEMS_PER_PAGE = 25
-  const queue = session.musicPlayer.queue
-  const totalPages = Math.max(Math.ceil(queue.length / ITEMS_PER_PAGE), 1)
   let currentPage = 0
-
+  const queue = session.musicPlayer.queue
   const userState = session.getUserState(userId)
 
-  const generateQueueEmbedText = (queue: QueueItem[], page: number): string => {
-    const start = page * ITEMS_PER_PAGE
-    const end = start + ITEMS_PER_PAGE
-    return (
-      queue
-        .slice(start, end)
-        .map(
-          (item, index) =>
-            `[${start + index + 1}] [${truncateText(
-              escapeDiscordMarkdown(item.video.title),
-              45
-            )}](${item.video.url}) - (${isoToTimestamp(item.video.duration)}) <@${item.userId}>`
-        )
-        .join('\n') || '<a:emoji:1132934927382499388> No songs queued.'
-    )
-  }
-
-  const createPaginationRow = (page: number, total: number) => {
-    return new ActionRowBuilder<ButtonBuilder>().addComponents(
-      new ButtonBuilder()
-        .setCustomId('queue_prev')
-        .setLabel('Previous')
-        .setStyle(ButtonStyle.Primary)
-        .setDisabled(page === 0),
-      new ButtonBuilder()
-        .setCustomId('queue_next')
-        .setLabel('Next')
-        .setStyle(ButtonStyle.Primary)
-        .setDisabled(page >= total - 1)
-    )
-  }
+  const { embed, components, totalPages } = createPaginatedQueueEmbed({
+    queue,
+    page: currentPage,
+    itemsPerPage: ITEMS_PER_PAGE,
+  })
 
   await interaction.reply({
-    embeds: [createQueueEmbed({ text: generateQueueEmbedText(queue, currentPage) })],
-    components: totalPages > 1 ? [createPaginationRow(currentPage, totalPages)] : [],
+    embeds: [embed],
+    components,
     ephemeral: true,
   })
-  const replyMsg = await interaction.fetchReply()
 
+  const replyMsg = await interaction.fetchReply()
   const collector = replyMsg.createMessageComponentCollector({
     componentType: ComponentType.Button,
     filter: (i) => i.user.id === userId && ['queue_prev', 'queue_next'].includes(i.customId),
     time: 60000,
   })
+
   userState.queueManager = { currentPage, totalPages, collector }
 
   collector.on('collect', async (btnInteraction) => {
@@ -290,22 +276,72 @@ const handleViewQueue = async ({
       page = Math.min(userState.queueManager.totalPages - 1, page + 1)
     }
 
-    const embed = createQueueEmbed({ text: generateQueueEmbedText(queue, page) })
-    const components =
-      userState.queueManager.totalPages > 1 ? [createPaginationRow(page, userState.queueManager.totalPages)] : []
+    const { embed, components } = createPaginatedQueueEmbed({
+      queue,
+      page,
+      itemsPerPage: ITEMS_PER_PAGE,
+    })
 
     await btnInteraction.update({
       embeds: [embed],
       components,
     })
 
-    userState.queueManager = { currentPage: page }
+    userState.queueManager = { currentPage: page, totalPages: userState.queueManager.totalPages, collector }
   })
 
   collector.on('end', () => {
-    // Only clean up if it's the same collector
     if (userState.queueManager.collector === collector) {
       userState.queueManager = { collector: null }
     }
   })
+}
+
+function createPaginatedQueueEmbed({
+  queue,
+  page,
+  itemsPerPage = 25,
+}: {
+  queue: QueueItem[]
+  page: number
+  itemsPerPage?: number
+}) {
+  const totalPages = Math.max(Math.ceil(queue.length / itemsPerPage), 1)
+
+  const start = page * itemsPerPage
+  const end = start + itemsPerPage
+
+  const description =
+    queue
+      .slice(start, end)
+      .map(
+        (item, index) =>
+          `[${start + index + 1}] [${truncateText(
+            escapeDiscordMarkdown(item.video?.title),
+            45
+          )}](${item.video.url}) - (${isoToTimestamp(item.video.duration)}) <@${item.userId}>`
+      )
+      .join('\n') || '<a:emoji:1132934927382499388> No songs queued.'
+
+  const embed = createQueueEmbed({ text: description })
+
+  const components =
+    totalPages > 1
+      ? [
+          new ActionRowBuilder<ButtonBuilder>().addComponents(
+            new ButtonBuilder()
+              .setCustomId('queue_prev')
+              .setLabel('Previous')
+              .setStyle(ButtonStyle.Primary)
+              .setDisabled(page === 0),
+            new ButtonBuilder()
+              .setCustomId('queue_next')
+              .setLabel('Next')
+              .setStyle(ButtonStyle.Primary)
+              .setDisabled(page >= totalPages - 1)
+          ),
+        ]
+      : []
+
+  return { embed, components, totalPages }
 }

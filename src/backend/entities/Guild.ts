@@ -1,6 +1,7 @@
 import { Entity, PrimaryColumn, Column, OneToMany } from 'typeorm'
 import { UserHistory } from './UserHistory'
 import { Playlist } from './Playlist'
+import { GuildTrackProfile } from './GuildTrackProfile' // import this
 
 @Entity('guilds')
 export class Guild {
@@ -18,4 +19,8 @@ export class Guild {
 
   @OneToMany(() => Playlist, (playlist) => playlist.guild)
   playlists?: Playlist[]
+
+  // Add this inverse relation for guildTrackProfiles:
+  @OneToMany(() => GuildTrackProfile, (profile) => profile.guild)
+  guildTrackProfiles?: GuildTrackProfile[]
 }

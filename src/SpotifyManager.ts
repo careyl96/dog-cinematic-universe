@@ -53,11 +53,16 @@ export class SpotifyManager {
     return match ? match[2] || match[3] : null
   }
 
+  private extractAlbumId(url: string): string | null {
+    const match = url.match(/^https:\/\/open\.spotify\.com\/album\/([a-zA-Z0-9]+)(\?.*)?$/)
+    return match ? match[1] : null
+  }
+
   public async getTrackNameAndAuthor(trackUrl: string): Promise<string> {
     // Extract the track ID from the URL
     const trackId = this.extractTrackId(trackUrl)
     if (!trackId) {
-      throw new Error('Invalid Spotify track URL.')
+      throw new Error(`Invalid Spotify track URL: ${trackUrl}`)
     }
 
     // Get the access token for authorization
@@ -79,7 +84,7 @@ export class SpotifyManager {
   public async getPlaylistTracks(playlistUrl: string, limit: number = 100): Promise<string[]> {
     const playlistId = this.extractPlaylistId(playlistUrl)
     if (!playlistId) {
-      throw new Error('Invalid Spotify playlist URL.')
+      throw new Error(`Invalid Spotify playlist URL: ${playlistUrl}`)
     }
 
     const token = await this.getAccessToken()
@@ -100,6 +105,37 @@ export class SpotifyManager {
       })
 
       tracks = tracks.concat(pageTracks)
+      nextUrl = data.next
+    }
+
+    return tracks.slice(0, limit)
+  }
+
+  public async getAlbumTracks(albumUrl: string, limit: number = 50): Promise<string[]> {
+    const albumId = this.extractAlbumId(albumUrl)
+    if (!albumId) {
+      throw new Error(`Invalid Spotify album URL: ${albumUrl}`)
+    }
+
+    const token = await this.getAccessToken()
+    const headers = { Authorization: `Bearer ${token}` }
+
+    let tracks: string[] = []
+    let nextUrl: string | null = `https://api.spotify.com/v1/albums/${albumId}/tracks?limit=50`
+    let totalFetched = 0
+
+    while (nextUrl && totalFetched < limit) {
+      const response = await axios.get(nextUrl, { headers })
+      const data = response.data
+
+      const pageTracks = data.items.map((track: any) => {
+        const name = track.name
+        const artists = track.artists.map((a: any) => a.name).join(', ')
+        return `${name} - ${artists}`
+      })
+
+      tracks = tracks.concat(pageTracks)
+      totalFetched = tracks.length
       nextUrl = data.next
     }
 

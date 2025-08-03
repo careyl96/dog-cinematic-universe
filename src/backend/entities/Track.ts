@@ -1,8 +1,9 @@
 import { Entity, PrimaryColumn, Column, OneToMany, OneToOne } from 'typeorm'
-import { IsDate, IsNotEmpty, IsOptional, IsString, Matches, Min } from 'class-validator'
+import { IsOptional, IsString, Matches } from 'class-validator'
 import { UserHistory } from './UserHistory'
 import { PlaylistTrack } from './PlaylistTrack'
 import { CachedTrack } from './CachedTrack'
+import { GuildTrackProfile } from './GuildTrackProfile'
 
 @Entity('tracks')
 export class Track {
@@ -26,28 +27,6 @@ export class Track {
   @IsString()
   liveBroadcastContent?: string
 
-  @Column({ name: 'user_play_count', type: 'int', default: 0 })
-  @IsOptional()
-  @Min(0)
-  userPlayCount?: number
-
-  @Column({
-    name: 'last_played_at',
-    type: 'timestamptz',
-    nullable: true,
-  })
-  @IsOptional()
-  @IsDate()
-  lastPlayedAt?: Date
-
-  @Column({ name: 'first_played_by', type: 'varchar', nullable: true })
-  @IsOptional()
-  @IsString()
-  firstPlayedBy?: string
-
-  @Column({ name: 'blacklisted', type: 'boolean', default: false })
-  blacklisted?: boolean
-
   @OneToMany(() => UserHistory, (hist) => hist.track)
   history?: UserHistory[]
 
@@ -58,4 +37,7 @@ export class Track {
     cascade: true,
   })
   cachedTrack?: CachedTrack
+
+  @OneToMany(() => GuildTrackProfile, (profile) => profile.track)
+  guildTrackProfiles?: GuildTrackProfile[]
 }

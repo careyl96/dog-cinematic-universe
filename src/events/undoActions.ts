@@ -16,7 +16,6 @@ import { QueueItem } from '../MusicPlayer'
 import { playlistCtrl } from '../backend/controllers/Controllers'
 import { GuildSession } from '../GuildSession'
 import { removeFromQueue } from '../helpers/playerFunctions'
-import { extractYouTubeIdFromUrl } from '../helpers/youtubeHelpers/youtubeFormatterHelpers'
 
 export default {
   name: Events.InteractionCreate,
@@ -43,11 +42,11 @@ export default {
       case UNDO.QUEUE:
         await interaction.deferUpdate()
         try {
-          const message = interaction.message
-          const url = getUrlFromQueueEmbed(message?.embeds?.[0]?.data?.description)
-          const videoId = extractYouTubeIdFromUrl(url)
-          if (url) await removeFromQueue({ session, videoId })
-          await userState.clearInteraction(videoId)
+          const videoIds = userState.queuedTracks.map((track) => track.id)
+          if (videoIds) {
+            await removeFromQueue({ session, videoIds })
+          }
+          await userState.clearInteraction(videoIds[0])
         } catch (error: any) {
           interaction.reply({
             content: error?.message || 'Something wrong :(',

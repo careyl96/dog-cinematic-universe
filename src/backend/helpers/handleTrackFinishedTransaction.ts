@@ -3,6 +3,7 @@ import { TrackController } from '../controllers/TrackController'
 import { UserHistoryController } from '../controllers/UserHistoryController'
 import { AppDataSource } from '../db/data-source'
 import { BOT_USER_ID } from '../../constants'
+import { ExtendedTrack } from '../../EmbedManager'
 
 export const handleTrackFinishedTransaction = async ({
   userId,
@@ -12,7 +13,7 @@ export const handleTrackFinishedTransaction = async ({
 }: {
   userId: string
   guildId: string
-  trackData: Track
+  trackData: ExtendedTrack
   startTimestamp: number
 }) => {
   return await AppDataSource.manager.transaction(async (manager) => {
@@ -26,7 +27,7 @@ export const handleTrackFinishedTransaction = async ({
       user = await userCtrl.upsert(userId)
     }
 
-    const existingTrack = await trackCtrl.getById(trackData.id)
+    const existingTrack = await trackCtrl.getById(trackData.id, guildId)
 
     let track = existingTrack
 
@@ -36,10 +37,10 @@ export const handleTrackFinishedTransaction = async ({
         ...trackData,
         lastPlayedAt: new Date(startTimestamp),
         firstPlayedBy: existingTrack?.firstPlayedBy || userId,
-        playCount: (existingTrack?.userPlayCount ?? 0) + 1,
+        userPlayCount: (existingTrack?.userPlayCount ?? 0) + 1,
       }
 
-      track = await trackCtrl.upsert(updatedTrackData)
+      track = await trackCtrl.upsert(updatedTrackData, guildId)
     }
 
     // 3. Always log history

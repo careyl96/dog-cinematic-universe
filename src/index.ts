@@ -89,7 +89,29 @@ const setEventListeners = async () => {
         await event.execute(client, session, ...args)
       }
 
-      client.on(event.name, handler)
+      if (event.name === 'raw') {
+        client.on(event.name, async (packet) => {
+          const guildId = packet.d.guild_id
+          const guildName: string = null
+
+          if (!guildId) return
+
+          let guild = await guildCtrl.getById(guildId)
+          if (!guild) {
+            guild = await guildCtrl.upsert({ id: guildId, name: guildName || 'Unknown Guild' })
+          }
+
+          let session = client.guildSessions.get(guildId)
+          if (!session) {
+            session = await GuildSession.create({ guild })
+            client.guildSessions.set(guildId, session)
+          }
+
+          await event.execute(client, session, packet)
+        })
+      } else {
+        client.on(event.name, handler)
+      }
     }
   }
 }

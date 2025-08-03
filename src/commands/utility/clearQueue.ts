@@ -1,4 +1,10 @@
-import { ChatInputCommandInteraction, EmbedBuilder, InteractionContextType, SlashCommandBuilder } from 'discord.js'
+import {
+  ChatInputCommandInteraction,
+  EmbedBuilder,
+  InteractionContextType,
+  MessageFlags,
+  SlashCommandBuilder,
+} from 'discord.js'
 import { client } from '../..'
 
 export default {
@@ -9,10 +15,16 @@ export default {
   async execute(interaction: ChatInputCommandInteraction) {
     const session = client.guildSessions.get(interaction.guildId)
     try {
-      await session.musicPlayer?.clearQueue()
+      const queueWasCleared = await session.musicPlayer?.clearQueue()
 
-      const queueEmbed = new EmbedBuilder().setDescription('Queue has been cleared')
-      await interaction.reply({ embeds: [queueEmbed] })
+      let queueEmbed = new EmbedBuilder().setColor(0xffa200)
+      if (queueWasCleared) {
+        queueEmbed.setDescription('The queue has been cleared')
+        await interaction.reply({ embeds: [queueEmbed] })
+      } else {
+        queueEmbed.setDescription('Nothing in queue')
+        await interaction.reply({ embeds: [queueEmbed], flags: MessageFlags.Ephemeral })
+      }
     } catch (err) {
       console.error(err)
     }

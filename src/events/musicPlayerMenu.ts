@@ -13,7 +13,7 @@ import {
   TextInputStyle,
 } from 'discord.js'
 import { ClientWithCommands } from '../ClientWithCommands'
-import { createCustomEmbed, createUndoButtonRow } from '../helpers/embedHelpers'
+import { createCustomEmbed } from '../helpers/embedHelpers'
 import { escapeDiscordMarkdown, isoToTimestamp, timestampToISO, truncateText } from '../helpers/formatterHelpers'
 import { queue } from '../helpers/playerFunctions'
 import { extractYouTubeIdFromUrl, uncompressTrack } from '../helpers/youtubeHelpers/youtubeFormatterHelpers'
@@ -23,9 +23,7 @@ import { playlistCtrl, trackCtrl } from '../backend/controllers/Controllers'
 import { GuildSession } from '../GuildSession'
 import { ensureVoiceConnectionOrReply } from '../helpers/voiceConnectionHelpers'
 import { FormattedYoutubeVideo } from '../helpers/youtubeHelpers/youtubeHelpers'
-import { Track } from '../backend/entities/Track'
 import { ExtendedTrack } from '../EmbedManager'
-import { UNDO } from '../constants'
 import { AudioPlayerStatus } from '@discordjs/voice'
 
 const PLAYLIST = {
@@ -55,6 +53,7 @@ const PLAYLIST = {
 
   TRACK_SELECT: 'playlist:track:select',
   QUEUE_TRACK_CONFIRM: 'playlist:queue:confirm',
+  QUEUE_ALL: 'playlist:queue:all:confirm',
 
   SELECTION_CLEAR: 'playlist:track:selection:clear',
 }
@@ -243,7 +242,7 @@ export default {
           })
           const createNewPlaylistButton = new ButtonBuilder()
             .setCustomId(PLAYLIST.CREATE_FROM_TRACK)
-            .setLabel(`Create new playlist`)
+            .setLabel(`Create new playlist with track`)
             .setEmoji('🌱')
             .setStyle(ButtonStyle.Secondary)
           const navigationRow = new ActionRowBuilder<ButtonBuilder>().addComponents(backButton, createNewPlaylistButton)
@@ -302,32 +301,26 @@ export default {
           break
         }
 
+        case PLAYLIST.QUEUE_ALL:
         case PLAYLIST.QUEUE_TRACK_CONFIRM: {
           await interaction.deferUpdate()
-          const connected = await ensureVoiceConnectionOrReply(interaction, session, userId, false)
-          if (!connected) break
 
-          const selectedTrackIds = state.playlist.selectedTracks
-          const selectedTracks: ExtendedTrack[] = await trackCtrl.getByIds(selectedTrackIds)
+          const isQueueAll = interaction.customId === PLAYLIST.QUEUE_ALL
+          const trackIds = isQueueAll ? state.playlist.allTracks.map((t) => t.id) : state.playlist.selectedTracks
+          const tracks: ExtendedTrack[] = await trackCtrl.getByIds(trackIds, guildId)
 
-          const queueLengthBeforeQueuingTrack = musicPlayer.queue.length
-          const tracksToDisplay =
-            queueLengthBeforeQueuingTrack === 0 && musicPlayer.player.state.status === AudioPlayerStatus.Idle
-              ? selectedTracks.slice(1)
-              : selectedTracks
+          const queueEmpty =
+            musicPlayer.queue.length === 0 && musicPlayer.player.state.status === AudioPlayerStatus.Idle
+          const tracksToDisplay = queueEmpty ? tracks.slice(1) : tracks
 
-          if (selectedTracks && selectedTracks.length > 0) {
-            const currentQueue = musicPlayer.queue
-            const startIndex =
-              currentQueue.length - selectedTracks.length < 0 ? 0 : currentQueue.length - selectedTracks.length
+          if (tracks && tracks.length > 0) {
+            const currentQueueLength = musicPlayer.queue.length
+            const startIndex = Math.max(currentQueueLength - tracks.length, 0)
 
             const reply = tracksToDisplay
               .map((track, i) => {
                 const position = startIndex + i + 1
-                return `[${position}] [${truncateText(
-                  escapeDiscordMarkdown(track.title),
-                  45
-                )}](${track.url}) - (${isoToTimestamp(track.duration)}) `
+                return `[${position}] [${truncateText(escapeDiscordMarkdown(track.title), 45)}](${track.url}) - (${isoToTimestamp(track.duration)})`
               })
               .join('\n')
 
@@ -347,8 +340,9 @@ export default {
           await queue({
             session,
             userId,
-            query: selectedTrackIds,
+            query: tracks.map((track) => track.url),
           })
+
           break
         }
 
@@ -510,7 +504,7 @@ export const renderPlaylistView = async ({
   session: GuildSession
   interaction: any
   playlistId: string
-  newVideo?: FormattedYoutubeVideo
+  newVideo?: ExtendedTrack | FormattedYoutubeVideo
   textContent?: string
   reply?: boolean
 }) => {
@@ -523,19 +517,26 @@ export const renderPlaylistView = async ({
   state.playlist = {
     id: playlistId,
     selectedTracks: [],
+    allTracks: [],
     collectors: [],
   }
   let playlist = await playlistCtrl.getById(parseInt(playlistId, 10))
 
-  let videos = playlist.tracks.map((playlistTrack: any) => uncompressTrack(playlistTrack.track)) as any[]
+  let videos = playlist.tracks.map((playlistTrack: any) => uncompressTrack(playlistTrack.track)) as ExtendedTrack[]
+  state.playlist.allTracks = videos
 
   const backButton = new ButtonBuilder()
     .setCustomId(PLAYLIST.LIST_UPDATE)
     .setLabel('Back')
     .setEmoji('⬅️')
     .setStyle(ButtonStyle.Secondary)
+  const queueAllButton = new ButtonBuilder()
+    .setCustomId(PLAYLIST.QUEUE_ALL)
+    .setLabel('Queue entire playlst')
+    .setEmoji('🚀')
+    .setStyle(ButtonStyle.Success)
 
-  let navigationRow = new ActionRowBuilder<ButtonBuilder>().addComponents(backButton)
+  let navigationRow = new ActionRowBuilder<ButtonBuilder>().addComponents(backButton, queueAllButton)
 
   if (videos.length === 0) {
     const emptyPayload = {
@@ -620,12 +621,14 @@ export const renderPlaylistView = async ({
 
       const queueButton = new ButtonBuilder()
         .setCustomId(PLAYLIST.QUEUE_TRACK_CONFIRM)
-        .setLabel('✅ Send to queue')
+        .setLabel('Send to queue')
+        .setEmoji('✅')
         .setStyle(ButtonStyle.Success)
 
       const removeButton = new ButtonBuilder()
         .setCustomId(PLAYLIST.REMOVE_TRACK_CONFIRM)
         .setLabel('Remove from playlist')
+        .setEmoji('🗑️')
         .setStyle(ButtonStyle.Danger)
 
       const clearButton = new ButtonBuilder()
@@ -680,11 +683,11 @@ export const renderPlaylistView = async ({
       }
 
       playlist = await playlistCtrl.getById(parseInt(state.playlist.id, 10))
-
       const updatedVideos = playlist.tracks.map((playlistTrack) => uncompressTrack(playlistTrack.track))
+      state.playlist.allTracks = updatedVideos
 
       if (updatedVideos.length === 0) {
-        const navRow = new ActionRowBuilder<ButtonBuilder>().addComponents(backButton)
+        const navRow = new ActionRowBuilder<ButtonBuilder>().addComponents(backButton, queueAllButton)
 
         if (reply) {
           const replyInteraction = state.interaction

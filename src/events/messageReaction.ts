@@ -5,6 +5,8 @@ import { extractVideoDataFromMessage, NowPlayingEmbedState } from '../helpers/em
 import { removeFromQueue } from '../helpers/playerFunctions'
 import { playlistCtrl, trackCtrl } from '../backend/controllers/Controllers'
 import { GuildSession } from '../GuildSession'
+import { AudioPlayerStatus } from '@discordjs/voice'
+import { Track } from '../backend/entities/Track'
 
 // UNUSED AS OF 5/21/2025
 // Raw instead of MessageReactionAdd/Remove because it doesn't work for cached messages
@@ -22,10 +24,10 @@ export default {
     const userId = packet.d.user_id
     const guildId = packet.d.guild_id
 
-    const { musicPlayer } = session
+    const musicPlayer = session.musicPlayer
     const message = await session.musicBotTextChannel.messages.fetch(packet.d.message_id)
 
-    const videoData: Track = extractVideoDataFromMessage(message)
+    const videoData = extractVideoDataFromMessage(message)
     if (!videoData) return
 
     const playerState: NowPlayingEmbedState = musicPlayer.embedManager.embedState
@@ -36,17 +38,17 @@ export default {
         return
       }
       if (packet.d.emoji.name === '🚫') {
-        const currentlyPlaying = musicPlayer.embedManager.track
+        const currentlyPlaying = musicPlayer.track
         if (videoData.title === currentlyPlaying?.title) {
           if (
-            playerState === NowPlayingEmbedState.Playing ||
-            playerState === NowPlayingEmbedState.Paused ||
-            playerState === NowPlayingEmbedState.Loading
+            musicPlayer.player.state.status === AudioPlayerStatus.Playing ||
+            musicPlayer.player.state.status === AudioPlayerStatus.Paused ||
+            musicPlayer.player.state.status === AudioPlayerStatus.Buffering
           ) {
             musicPlayer.skip(userId)
           }
         }
-        const blacklistedTrack = await trackCtrl.blacklistById(videoData.id)
+        const blacklistedTrack = await trackCtrl.blacklistById(videoData.id, guildId)
         console.log('Blacklisted tracK: ', blacklistedTrack)
         return
       }
@@ -87,7 +89,7 @@ export default {
           }
         } else {
           musicPlayer.enqueue({
-            videosToQueue: videoData,
+            videosToQueue: videoData as any,
             userId,
             queueInPosition: 0,
           })
@@ -103,7 +105,7 @@ export default {
         return
       }
       if (packet.d.emoji.name === '🚫') {
-        const unBlacklistedTrack = await trackCtrl.unBlacklistById(videoData.id)
+        const unBlacklistedTrack = await trackCtrl.unBlacklistById(videoData.id, guildId)
         console.log('Unblacklisted track: ', unBlacklistedTrack)
         return
       }

@@ -22,7 +22,7 @@ export const play = async ({
   userId,
   query,
   force = false,
-  triggeredByBot = false,
+  // triggeredByBot = false,
   queueInPosition,
   interaction,
 }: PlayOptions) => {
@@ -47,17 +47,11 @@ export const play = async ({
     if (force) {
       await musicPlayer.forcePlay({ query, userId, interaction })
     } else {
-      if (triggeredByBot && musicPlayer.player.state.status === AudioPlayerStatus.Playing) return
       await musicPlayer.enqueue({ query, userId, queueInPosition, interaction })
     }
   } catch (err) {
     console.error(`Error in play(): ${err}`)
-    if (!triggeredByBot && interaction) {
-      await interaction.followUp({
-        content: 'An error occurred while trying to play music.',
-        ephemeral: true,
-      })
-    }
+    throw err
   }
 }
 
@@ -85,7 +79,7 @@ export const queue = async ({ session, userId, query, interaction }: QueueOption
     const queries = typeof query === 'string' ? [query] : query
 
     for (const q of queries) {
-      const video = await fetchYoutubeVideosFromUrlOrQuery({ session, urlOrQuery: q, interaction })
+      const video = await fetchYoutubeVideosFromUrlOrQuery({ session, urlOrQuery: q })
       if (video && !Array.isArray(video)) videos.push(video)
     }
 
@@ -223,13 +217,14 @@ export const skip = async (session: GuildSession, userId: string) => {
 }
 
 export const getRandomVideos = async ({
+  session,
   count = 1,
 }: {
   session: GuildSession
   count?: number
 }): Promise<ExtendedTrack[]> => {
   try {
-    const allTracks = await trackCtrl.getAllNonBlacklisted()
+    const allTracks = await trackCtrl.getAllNonBlacklisted(session.guild.id)
     const selectedTracks = pickRandomItemsFromList(allTracks, count)
 
     const results: ExtendedTrack[] = []

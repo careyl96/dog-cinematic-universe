@@ -100,7 +100,7 @@ export const extractVideoDataFromMessage = (message: any): ExtendedTrack => {
   return videoData
 }
 
-export const formatYoutubeVideoTitleForEmbed = (video: Track): string => {
+export const formatYoutubeVideoTitleForEmbed = (video: ExtendedTrack): string => {
   if (video.liveBroadcastContent === 'live') {
     return `🔴 LIVE 🔴 - ${video.title}`
   }

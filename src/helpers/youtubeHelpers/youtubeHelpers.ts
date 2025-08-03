@@ -5,13 +5,12 @@ import axios from 'axios'
 
 import { Readable } from 'form-data'
 import { fetchPlaylistViaYts, fetchViaYTS } from './ytsHelpers'
-import { formatYoutubeVideoFromIdSearch, UncompressedTrack } from './youtubeFormatterHelpers'
+import { formatYoutubeVideoFromIdSearch } from './youtubeFormatterHelpers'
 import { PassThrough } from 'stream'
 import { client } from '../..'
-import { createErrorEmbed } from '../embedHelpers'
-import { MessageFlags } from 'discord.js'
 import { trackCtrl } from '../../backend/controllers/Controllers'
 import { GuildSession } from '../../GuildSession'
+import { ExtendedTrack } from '../../EmbedManager'
 
 export type FormattedYoutubeVideo = {
   title: string
@@ -87,69 +86,67 @@ export const fetchYoutubeVideosFromUrlOrQuery = async ({
   session: GuildSession
   urlOrQuery: string
   useYts?: boolean
-  interaction?: any
-}): Promise<UncompressedTrack | FormattedYoutubeVideo | FormattedYoutubeVideo[]> => {
+}): Promise<ExtendedTrack | FormattedYoutubeVideo | FormattedYoutubeVideo[]> => {
   const item = detectSource(urlOrQuery)
 
-  const fallback = async (): Promise<FormattedYoutubeVideo | FormattedYoutubeVideo[]> => {
-    let result: UncompressedTrack | FormattedYoutubeVideo | FormattedYoutubeVideo[] | null = null
-
+  const getYoutubeResult = async (
+    {
+      useBackupApi,
+    }: {
+      useBackupApi: boolean
+    } = {
+      useBackupApi: useYts,
+    }
+  ): Promise<FormattedYoutubeVideo | FormattedYoutubeVideo[] | ExtendedTrack> => {
     if (item.source === 'youtube') {
       if (item.type === 'playlist') {
-        result = await fetchPlaylistViaYts(urlOrQuery)
-      } else if (item.type === 'single') {
-        const cachedVideo = await trackCtrl.getByIdAndFormat(item.id)
-        result = cachedVideo ?? (await fetchViaYTS({ query: urlOrQuery, isUrl: true, videoId: item.id }))
+        return useBackupApi ? fetchPlaylistViaYts(urlOrQuery) : fetchYoutubePlaylistById(item.id)
       }
-    } else if (item.source === 'spotify') {
-      if (item.type === 'playlist') {
-        const trackNames = await client.spotify.getPlaylistTracks(urlOrQuery)
-        result = await Promise.all(trackNames.map((trackName) => fetchViaYTS({ query: trackName, isUrl: false })))
-      } else if (item.type === 'single') {
-        const query = await client.spotify.getTrackNameAndAuthor(urlOrQuery)
-        result = await fetchViaYTS({ query, isUrl: false })
+
+      if (item.type === 'single') {
+        const cached = await trackCtrl.getByIdAndFormat(item.id, session.guild.id)
+        return (
+          cached ??
+          (useBackupApi
+            ? fetchViaYTS({ query: urlOrQuery, isUrl: true, videoId: item.id })
+            : fetchYoutubeVideoById(item.id))
+        )
       }
     }
 
-    return result ?? (await fetchViaYTS({ query: urlOrQuery, isUrl: false }))
+    if (item.source === 'spotify') {
+      if (item.type === 'playlist') {
+        const trackNames = await client.spotify.getPlaylistTracks(urlOrQuery)
+        return useBackupApi
+          ? Promise.all(trackNames.map((name) => fetchViaYTS({ query: name, isUrl: false })))
+          : Promise.all(trackNames.map((name) => fetchYoutubeVideoByQuery(name)))
+      }
+
+      if (item.type === 'album') {
+        const trackNames = await client.spotify.getAlbumTracks(urlOrQuery)
+        return useBackupApi
+          ? Promise.all(trackNames.map((name) => fetchViaYTS({ query: name, isUrl: false })))
+          : Promise.all(trackNames.map((name) => fetchYoutubeVideoByQuery(name)))
+      }
+
+      if (item.type === 'single') {
+        const name = await client.spotify.getTrackNameAndAuthor(urlOrQuery)
+        return useBackupApi ? fetchViaYTS({ query: name, isUrl: false }) : fetchYoutubeVideoByQuery(name)
+      }
+    }
+
+    // Default fallback if input doesn't match a known type
+    return useBackupApi ? fetchViaYTS({ query: urlOrQuery, isUrl: false }) : fetchYoutubeVideoByQuery(urlOrQuery)
   }
 
   try {
-    let result: UncompressedTrack | FormattedYoutubeVideo | FormattedYoutubeVideo[] | null = null
-
-    if (useYts) {
-      result = await fallback()
-    } else if (item.source === 'youtube') {
-      if (item.type === 'playlist') {
-        result = await fetchYoutubePlaylistById(item.id)
-      } else if (item.type === 'single') {
-        const cachedVideo = await trackCtrl.getByIdAndFormat(item.id)
-        result = cachedVideo ?? (await fetchYoutubeVideoById(item.id))
-      }
-    } else if (item.source === 'spotify') {
-      if (item.type === 'playlist') {
-        const trackNames = await client.spotify.getPlaylistTracks(urlOrQuery)
-        result = await Promise.all(trackNames.map((trackName) => fetchYoutubeVideoByQuery(trackName)))
-      } else if (item.type === 'single') {
-        const trackName = await client.spotify.getTrackNameAndAuthor(urlOrQuery)
-        result = await fetchYoutubeVideoByQuery(trackName)
-      }
-    }
-
-    return result ?? (await fetchYoutubeVideoByQuery(urlOrQuery))
+    return await getYoutubeResult()
   } catch (error) {
+    console.warn('Primary fetch failed. Trying fallback...')
     try {
-      return await fallback()
+      return await getYoutubeResult({ useBackupApi: true })
     } catch (fallbackErr) {
       console.error('Both YouTube API and yt-search failed:', fallbackErr)
-
-      const errorEmbed = createErrorEmbed({
-        errorMessage: `Video unavailable: ${urlOrQuery}`,
-        flags: MessageFlags.Ephemeral,
-      }) as any
-
-      await session.musicBotTextChannel.send(errorEmbed)
-
       throw fallbackErr
     }
   }
@@ -173,7 +170,8 @@ export const createYoutubeAudioStreamYtdl = (url: string): Readable => {
 
 // // creates the audio stream necessary for discord's audio player
 // // using youtube-dl-exec
-export const createYoutubeAudioStream = (video: UncompressedTrack | FormattedYoutubeVideo): Readable => {
+export const createYoutubeAudioStream = (video: ExtendedTrack | FormattedYoutubeVideo): Readable => {
+  console.log('creating audio stream!')
   const { url } = video
   if (!url) throw new Error('YouTube video URL is undefined (createYoutubeAudioStream)')
 
@@ -181,7 +179,7 @@ export const createYoutubeAudioStream = (video: UncompressedTrack | FormattedYou
     url,
     {
       output: '-',
-      format: 'bestaudio[ext=webm]',
+      format: 'bestaudio',
       noWarnings: true,
       ignoreErrors: true,
       quiet: false, // Set to false for verbose logs
@@ -194,7 +192,6 @@ export const createYoutubeAudioStream = (video: UncompressedTrack | FormattedYou
   )
 
   const audioStream = process.stdout
-
   // Return stream for bot audio streaming
   // Wrap the audio stream in a PassThrough to buffer and adjust the stream as needed
   const passThrough = new PassThrough({
@@ -202,6 +199,14 @@ export const createYoutubeAudioStream = (video: UncompressedTrack | FormattedYou
   })
 
   audioStream.pipe(passThrough)
+
+  passThrough.on('data', (chunk) => {
+    console.log('Received audio chunk, size:', chunk.length)
+  })
+
+  passThrough.on('end', () => {
+    console.log('Audio stream ended')
+  })
 
   return passThrough
 }
@@ -211,11 +216,12 @@ const detectSource = (
 ): {
   source: 'spotify' | 'youtube' | 'query'
   query?: string
-  type?: 'single' | 'playlist'
+  type?: 'single' | 'playlist' | 'album'
   id?: string
 } => {
   // YouTube video URL
-  const youtubeVideoRegex = /^https:\/\/(?:www\.)?(?:youtube\.com\/watch\?v=|youtu\.be\/)([a-zA-Z0-9_-]{11})(?:&.*)?$/
+  // const youtubeVideoRegex = /^https:\/\/(?:www\.)?(?:youtube\.com\/watch\?v=|youtu\.be\/)([a-zA-Z0-9_-]{11})(?:&.*)?$/
+  const youtubeVideoRegex = /^https:\/\/(?:www\.)?(?:youtube\.com\/watch\?v=|youtu\.be\/)([a-zA-Z0-9_-]{11})(?:\?.*)?$/
   const videoMatch = input.match(youtubeVideoRegex)
   if (videoMatch) {
     return { source: 'youtube', id: videoMatch[1], type: 'single' }
@@ -240,6 +246,12 @@ const detectSource = (
   const playlistMatch = input.match(spotifyPlaylistRegex)
   if (playlistMatch) {
     return { source: 'spotify', id: playlistMatch[1], type: 'playlist' }
+  }
+
+  const spotifyAlbumRegex = /^https:\/\/open\.spotify\.com\/album\/([a-zA-Z0-9]+)(\?.*)?$/
+  const albumMatch = input.match(spotifyAlbumRegex)
+  if (albumMatch) {
+    return { source: 'spotify', id: albumMatch[1], type: 'album' }
   }
 
   // Default to query (treated as single)

@@ -59,6 +59,8 @@ export class TimerManager {
 
   public stop() {
     const elapsedTime = this.state.elapsedTime
+    const startTime = this.state.startTime
+
     if (this.state.timerId) {
       clearTimeout(this.state.timerId)
     }
@@ -71,7 +73,7 @@ export class TimerManager {
       elapsedTime: 0,
       totalPausedDuration: 0,
     }
-    return elapsedTime
+    return { startTime, elapsedTime }
   }
 
   public getElapsedTime(): number {
@@ -99,6 +101,9 @@ export class TimerManager {
 
   private async handleScheduledUpdate() {
     if (this.state.isUpdating || this.state.startTime === null || this.state.pausedAt !== null) {
+      if (this.state.isUpdating) {
+        this.scheduleNextUpdate()
+      }
       return
     }
 

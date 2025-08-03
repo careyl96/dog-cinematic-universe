@@ -15,6 +15,7 @@ export class CachedTrack {
     name: 'cached_at',
     type: 'timestamptz',
     nullable: true,
+    default: () => 'CURRENT_TIMESTAMP',
   })
   @IsDate()
   cachedAt?: Date

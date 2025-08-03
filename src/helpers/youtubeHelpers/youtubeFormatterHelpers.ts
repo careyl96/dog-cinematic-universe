@@ -1,12 +1,10 @@
+import { GuildTrackProfile } from '../../backend/entities/GuildTrackProfile'
 import { Track } from '../../backend/entities/Track'
+import { ExtendedTrack } from '../../EmbedManager'
 import { FormattedYoutubeVideo } from './youtubeHelpers'
 
-export type UncompressedTrack = Track & {
-  url: string
-  thumbnail: string
-}
 
-export const uncompressTrack = (track: Track): UncompressedTrack => {
+export const uncompressTrack = (track: Partial<Track> & Partial<GuildTrackProfile>): ExtendedTrack => {
   return {
     ...track,
     url: createYoutubeUrlFromId(track.id),

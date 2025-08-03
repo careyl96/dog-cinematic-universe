@@ -7,6 +7,7 @@ import { Playlist } from '../entities/Playlist'
 import { PlaylistTrack } from '../entities/PlaylistTrack'
 import { CachedTrack } from '../entities/CachedTrack'
 import { Guild } from '../entities/Guild'
+import { GuildTrackProfile } from '../entities/GuildTrackProfile'
 
 dotenv.config()
 
@@ -19,5 +20,5 @@ export const AppDataSource = new DataSource({
   database: process.env.DB_NAME,
   synchronize: true, // ⚠️ for development only
   logging: false,
-  entities: [User, Track, UserHistory, Playlist, PlaylistTrack, CachedTrack, Guild],
+  entities: [User, Track, UserHistory, Playlist, PlaylistTrack, CachedTrack, Guild, GuildTrackProfile],
 })

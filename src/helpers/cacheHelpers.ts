@@ -5,11 +5,12 @@ import { CachedTrackController } from '../backend/controllers/CachedTrackControl
 import { TrackController } from '../backend/controllers/TrackController'
 import { cachedTrackCtrl } from '../backend/controllers/Controllers'
 import { Track } from '../backend/entities/Track'
-import { UncompressedTrack } from './youtubeHelpers/youtubeFormatterHelpers'
+import { AppDataSource } from '../backend/db/data-source'
+import { ExtendedTrack } from '../EmbedManager'
 
 export const cacheAudioResource = async (
   stream: Readable,
-  video: UncompressedTrack | FormattedYoutubeVideo
+  video: ExtendedTrack | FormattedYoutubeVideo
 ): Promise<void> => {
   const MAX_SIZE = 10 * 1024 * 1024 // 10 MB
   const cachedTrackCtrl = new CachedTrackController()
@@ -30,11 +31,11 @@ export const cacheAudioResource = async (
 
   await new Promise<void>((resolve) => {
     const ffmpegProcess = ffmpeg(stream)
-      .inputFormat('webm')
+      // .inputFormat('webm')
       .audioCodec('libvorbis')
       .format('ogg')
       .on('error', (err) => {
-        console.warn(`⚠️ FFmpeg error for ${video.id}:`, err.message)
+        console.warn(`⚠️ FFmpeg caching error for ${video.id}:`, err.message)
         resolve()
       })
 
@@ -58,8 +59,9 @@ export const cacheAudioResource = async (
       if (exceeded || chunks.length === 0) return resolve()
 
       try {
+        const trackEntity = Object.assign(new Track(), track)
         const oggBuffer = Buffer.concat(chunks)
-        const cachedTrack = await cachedTrackCtrl.upsert(video.id, oggBuffer, track)
+        const cachedTrack = await cachedTrackCtrl.upsert(video.id, oggBuffer, trackEntity)
         const { data, ...rest } = cachedTrack
         console.log(`💾 Cached audio!`, rest)
       } catch (e) {
@@ -71,7 +73,7 @@ export const cacheAudioResource = async (
   })
 }
 
-export const getAudioSource = async (video: UncompressedTrack | FormattedYoutubeVideo) => {
+export const getAudioSource = async (video: ExtendedTrack | FormattedYoutubeVideo) => {
   const cachedTrack = await cachedTrackCtrl.getById(video.id)
 
   return {

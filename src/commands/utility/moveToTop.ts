@@ -22,7 +22,7 @@ export default {
     const musicPlayer = session.musicPlayer
     const queue = musicPlayer.queue
 
-    if (!queue || queue.length === 0) {
+    if (queue.length === 0) {
       interaction.reply({
         content: 'The queue is currently empty.',
         flags: MessageFlags.Ephemeral,

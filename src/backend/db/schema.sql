@@ -36,8 +36,8 @@ CREATE TABLE playlists (
   user_id VARCHAR NOT NULL,
   name VARCHAR,
   public BOOLEAN DEFAULT FALSE,
-  created_at TIMESTAMPTZ,
-  updated_at TIMESTAMPTZ,
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  updated_at TIMESTAMPTZ DEFAULT NOW(),
   deletable BOOLEAN DEFAULT TRUE,
   FOREIGN KEY (user_id) REFERENCES users(id)
 );
@@ -61,12 +61,7 @@ CREATE TABLE tracks (
   id VARCHAR PRIMARY KEY,
   title VARCHAR,
   duration VARCHAR,
-  live_broadcast_content VARCHAR,
-  user_play_count INTEGER DEFAULT 0,
-  blacklisted BOOLEAN DEFAULT FALSE,
-  first_played_by VARCHAR,
-  last_played_at TIMESTAMPTZ,
-  FOREIGN KEY (first_played_by) REFERENCES users(id)
+  live_broadcast_content VARCHAR
 );
 
 DROP TABLE IF EXISTS users CASCADE;
@@ -74,7 +69,22 @@ DROP TABLE IF EXISTS users CASCADE;
 CREATE TABLE users (
   id VARCHAR PRIMARY KEY,
   username VARCHAR,
-  created_at TIMESTAMPTZ
+  created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE TABLE guild_track_profiles (
+  guild_id VARCHAR NOT NULL,
+  track_id VARCHAR NOT NULL,
+  blacklisted BOOLEAN DEFAULT FALSE,
+  volume INTEGER CHECK (volume >= 0 AND volume <= 100),
+  user_play_count INTEGER DEFAULT 0,
+  first_played_by VARCHAR NULL,
+  last_played_at TIMESTAMPTZ,
+  updated_at TIMESTAMPTZ DEFAULT NOW(),
+  PRIMARY KEY (guild_id, track_id),
+  FOREIGN KEY (guild_id) REFERENCES guilds(id) ON DELETE CASCADE,
+  FOREIGN KEY (track_id) REFERENCES tracks(id) ON DELETE CASCADE,
+  FOREIGN KEY (first_played_by) REFERENCES users(id) ON DELETE SET NULL
 );
 
 CREATE INDEX idx_playlist_tracks_playlist_id ON playlist_tracks(playlist_id);
@@ -87,6 +97,6 @@ CREATE INDEX idx_user_history_user_id ON user_history(user_id);
 
 CREATE INDEX idx_user_history_track_id ON user_history(track_id);
 
-CREATE INDEX idx_user_favorites_user_id ON user_favorites(user_id);
+CREATE INDEX idx_guild_track_profiles_guild_id ON guild_track_profiles(guild_id);
 
-CREATE INDEX idx_user_favorites_track_id ON user_favorites(track_id);
+CREATE INDEX idx_guild_track_profiles_track_id ON guild_track_profiles(track_id);

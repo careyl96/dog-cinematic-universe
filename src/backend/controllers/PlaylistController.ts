@@ -2,11 +2,7 @@ import { EntityManager, In } from 'typeorm'
 import { BaseController } from './BaseController'
 import { Playlist } from '../entities/Playlist'
 import { PlaylistTrack } from '../entities/PlaylistTrack'
-import {
-  Track,
-  TrackCompressed,
-  uncompressTrack,
-} from '../../helpers/youtubeHelpers/youtubeFormatterHelpers'
+import { uncompressTrack } from '../../helpers/youtubeHelpers/youtubeFormatterHelpers'
 
 export class PlaylistController extends BaseController<Playlist> {
   constructor(manager?: EntityManager) {

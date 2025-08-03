@@ -21,7 +21,6 @@ import { getRandomVideos } from './helpers/playerFunctions'
 import { cachedTrackCtrl, trackCtrl } from './backend/controllers/Controllers'
 import { GuildSession } from './GuildSession'
 import { EmbedManager, ExtendedTrack } from './EmbedManager'
-import { UncompressedTrack } from './helpers/youtubeHelpers/youtubeFormatterHelpers'
 
 interface YoutubeMusicPlayerOptions {
   session: GuildSession
@@ -29,7 +28,7 @@ interface YoutubeMusicPlayerOptions {
 }
 
 interface PlayAudioFromYoutubeOptions {
-  video: UncompressedTrack | FormattedYoutubeVideo
+  video: ExtendedTrack | FormattedYoutubeVideo
   userId: string
   roulette?: boolean
   overrideCurrentEmbed?: boolean
@@ -37,9 +36,8 @@ interface PlayAudioFromYoutubeOptions {
 }
 
 export type QueueItem = {
-  video: FormattedYoutubeVideo | UncompressedTrack
+  video: FormattedYoutubeVideo | ExtendedTrack
   userId: string
-  roulette?: boolean
   autoplay?: boolean
 }
 
@@ -51,7 +49,7 @@ interface ForcePlayOptions {
 }
 interface EnqueueOptions {
   query?: string
-  videosToQueue?: (UncompressedTrack | FormattedYoutubeVideo)[]
+  videosToQueue?: (ExtendedTrack | FormattedYoutubeVideo)[]
   userId: string
   queueInPosition?: number
   interaction?: any
@@ -128,16 +126,19 @@ export class YoutubeMusicPlayer {
 
   // overrwrite currently playing song
   async forcePlay({ query, userId, overrideCurrentEmbed = false, interaction }: ForcePlayOptions) {
+    // This flag prevents the next track from auto-playing when the audio player becomes idle.
+    // It's used during force play to avoid overlapping playback of the current and next track.
+    this.shouldPlayNextInQueue = false
+    if (this.player.state.status === AudioPlayerStatus.Paused) {
+      await this.stop({ skip: true, skippedByUserId: userId })
+    }
+
     const useYts = overrideCurrentEmbed ? false : true
     const video = (await fetchYoutubeVideosFromUrlOrQuery({
       session: this.session,
       urlOrQuery: query,
       useYts,
-    })) as UncompressedTrack | FormattedYoutubeVideo
-
-    // This flag prevents the next track from auto-playing when the audio player becomes idle.
-    // It's used during force play to avoid overlapping playback of the current and next track.
-    this.shouldPlayNextInQueue = false
+    })) as ExtendedTrack | FormattedYoutubeVideo
     await this.playAudioFromYTVideo({
       video,
       userId,
@@ -160,14 +161,14 @@ export class YoutubeMusicPlayer {
         useYts: this.player.state.status === AudioPlayerStatus.Idle,
       })
       if (!videos) {
-        console.error('##### Error with video(s)')
+        console.error('##### No videos found (enqueue)')
         return
       }
     } else if (videosToQueue) {
       videos = videosToQueue
     }
 
-    videos = Array.isArray(videos) ? videos : [videos]
+    videos = (Array.isArray(videos) ? videos : [videos]) as FormattedYoutubeVideo[] | ExtendedTrack[]
     const queueItems = videos.map((video) => ({ video, userId }) as QueueItem)
 
     if (queueInPosition !== undefined && queueInPosition >= 0 && queueInPosition <= this._queue.length) {
@@ -180,51 +181,71 @@ export class YoutubeMusicPlayer {
       await this.playNextInQueue(interaction)
     } else {
       if (interaction && !interaction.replied) {
-        const embed = new EmbedBuilder()
-          .setColor(0xffa200)
-          .setAuthor({ name: 'Queue Updated:' })
-          .setDescription(
-            videos
-              .map((video, index) => {
-                const queueIndex = this._queue.length - videos.length + index
-                const title = truncateText(escapeDiscordMarkdown(video.title), 60)
-                return `[${queueIndex + 1}] [${title}](${video.url})`
-              })
-              .join('\n')
-          )
+        const MAX_DESCRIPTION_LENGTH = 4096
+
+        const embed = new EmbedBuilder().setColor(0xffa200).setAuthor({ name: 'Queue Updated:' })
+
+        let description = ''
+        let countIncluded = 0
+
+        for (let i = 0; i < videos.length; i++) {
+          const queueIndex = this._queue.length - videos.length + i
+          const title = truncateText(escapeDiscordMarkdown(videos[i].title), 60)
+          const line = `[${queueIndex + 1}] [${title}](${videos[i].url})\n`
+
+          const remaining = videos.length - (i + 1)
+          const suffix = remaining > 0 ? `... and [${remaining}] others` : ''
+
+          // Check if adding this line (plus potential suffix) fits
+          if (description.length + line.length + suffix.length > MAX_DESCRIPTION_LENGTH) {
+            // If we can't add the line, append suffix if it fits
+            if (suffix.length > 0 && description.length + suffix.length <= MAX_DESCRIPTION_LENGTH) {
+              description += suffix
+            }
+            break
+          }
+
+          description += line
+          countIncluded++
+        }
+
+        embed.setDescription(description)
 
         await interaction.followUp({
           embeds: [embed],
           components: [createUndoButtonRow(UNDO.QUEUE)],
           ephemeral: true,
         })
-        const userState = this.session.userState.get(userId)
+        const userState = this.session.userStates.get(userId)
         userState.interaction = interaction
         userState.queuedTracks = videos
-        videos.forEach((video) => {
-          userState.interactionWithId[video.id] = interaction
-        })
+        userState.addQueueInteraction({ videoId: videos[0].id, interaction })
       }
     }
   }
 
   async playNextInQueue(interaction?: any) {
     let queueItem = this._queue.shift()
+
     if (!queueItem) {
       if (!this.autoplay) return
 
       const videos = await getRandomVideos({ session: this.session })
-      const video = videos[0]
+      if (videos.length === 0) {
+        console.error('No valid random video found')
+        return
+      }
+
       queueItem = {
-        video,
+        video: videos[0],
         userId: BOT_USER_ID,
       }
     }
 
+    // Play the video (from queue or autoplay)
     await this.playAudioFromYTVideo({
       video: queueItem.video,
       userId: queueItem.userId,
-      roulette: queueItem.roulette,
       interaction,
     })
   }
@@ -238,13 +259,14 @@ export class YoutubeMusicPlayer {
     interaction,
   }: PlayAudioFromYoutubeOptions) {
     if (interaction && !interaction.replied) interaction.deleteReply()
-    await this.session.ensureVoiceConnection(userId)
-    this.subscribeToMusicPlayer()
-    const track = await trackCtrl.ensureTrackCompleteOrUpsert(video, userId)
-    this.embedManager.setTrack({ track, userId })
-    this.track = track
 
     try {
+      await this.session.ensureVoiceConnection(userId)
+      this.subscribeToMusicPlayer()
+      const track = await trackCtrl.ensureValidTrackDataOrUpsert(video, userId, this.session.guild.id)
+      this.embedManager.setTrack({ track, userId })
+      this.track = track
+
       if (!overrideCurrentEmbed) {
         this.resetAudioVolume()
       }
@@ -270,9 +292,11 @@ export class YoutubeMusicPlayer {
       })
       this.playAudioResource(audioResource)
 
-      !cachedTrack && (await cacheAudioResource(audioStream as Readable, video))
+      if (!cachedTrack && video.liveBroadcastContent === 'none') {
+        await cacheAudioResource(audioStream as Readable, video)
+      }
     } catch (err) {
-      console.error(err)
+      console.log('eroerieorueoruoeiruo')
       throw err
     }
   }
@@ -313,7 +337,7 @@ export class YoutubeMusicPlayer {
   async handleTrackFinished() {
     await this.session.startIdleTimer()
     await this.embedManager.handleFinished()
-    this.shouldPlayNextInQueue && (await this.playNextInQueue())
+    if (this.shouldPlayNextInQueue && !!this.session.connection) await this.playNextInQueue()
   }
 
   async shuffle() {
@@ -323,10 +347,12 @@ export class YoutubeMusicPlayer {
   }
 
   async clearQueue() {
+    const queueWasCleared = this._queue.length > 0
     this._queue = []
+    return queueWasCleared
   }
 
-  async skip(userId: string) {
+  async skip(userId: string = BOT_USER_ID) {
     try {
       this.subscribeToMusicPlayer()
       await this.stop({ skip: true, skippedByUserId: userId })
@@ -378,7 +404,7 @@ export class YoutubeMusicPlayer {
     }
   }
 
-  async handleAutoplay(autoplay: boolean = this.autoplay) {
+  async setAutoplay(autoplay: boolean = this.autoplay) {
     if (this.autoplay === autoplay) return
     this.autoplay = autoplay
 

@@ -20,13 +20,15 @@ interface GuildSessionOptions {
   connection?: VoiceConnection | null
 }
 
+// One session per discord server
 export class GuildSession {
   guild: Guild
   musicBotTextChannel: TextChannel | null
   voiceChannel: VoiceBasedChannel | null
+
   connection: VoiceConnection | null
   musicPlayer: YoutubeMusicPlayer | null
-  userState: UserStateManager | null
+  userStates: UserStateManager | null
 
   private idleTimeout: NodeJS.Timeout | null = null
 
@@ -37,7 +39,7 @@ export class GuildSession {
 
     this.connection = connection ?? null
     this.musicPlayer = null
-    this.userState = new UserStateManager()
+    this.userStates = new UserStateManager()
 
     this.idleTimeout = null
   }
@@ -64,7 +66,7 @@ export class GuildSession {
   }
 
   getUserState = (userId: string) => {
-    return this.userState.get(userId)
+    return this.userStates.get(userId)
   }
 
   // bot disconnects after 5 minutes of inactivity
@@ -87,11 +89,6 @@ export class GuildSession {
     }
   }
 
-  async updateVoiceConnection(newVoiceChannel: VoiceChannel, connection: VoiceConnection) {
-    this.voiceChannel = newVoiceChannel
-    this.connection = connection
-  }
-
   async joinVoiceChannel(voiceChannelId: string): Promise<boolean> {
     try {
       if (this.voiceChannel?.id === voiceChannelId && this.connection?.joinConfig.channelId === voiceChannelId) {
@@ -104,15 +101,15 @@ export class GuildSession {
         this.connection = null
       }
 
-      const fetchedChannel = await client.channels.fetch(voiceChannelId)
-      if (!fetchedChannel || !(fetchedChannel instanceof VoiceChannel)) {
+      const voiceChannelToJoin = await client.channels.fetch(voiceChannelId)
+      if (!voiceChannelToJoin || !(voiceChannelToJoin instanceof VoiceChannel)) {
         throw new Error('Provided channel is not a valid voice channel.')
       }
 
       const connection = joinVoiceChannel({
-        channelId: fetchedChannel.id,
+        channelId: voiceChannelToJoin.id,
         guildId: this.guild.id,
-        adapterCreator: fetchedChannel.guild.voiceAdapterCreator,
+        adapterCreator: voiceChannelToJoin.guild.voiceAdapterCreator,
         selfDeaf: true,
         selfMute: false,
       })
@@ -130,13 +127,16 @@ export class GuildSession {
             entersState(connection, VoiceConnectionStatus.Connecting, 5_000),
           ])
         } catch {
-          connection.destroy()
+          try {
+            connection.destroy()
+          } catch {}
         }
       })
 
       await entersState(connection, VoiceConnectionStatus.Ready, 10_000)
 
-      await this.updateVoiceConnection(fetchedChannel, connection)
+      this.voiceChannel = voiceChannelToJoin
+      this.connection = connection
       return true
     } catch (error) {
       console.error(`[Voice] Failed to join voice channel in guild ${this.guild.id}:`, error)
@@ -179,7 +179,7 @@ export class GuildSession {
           try {
             const updatedChannel = (await client.channels.fetch(mostUsersChannel)) as any
             if (updatedChannel?.members.size === 1) {
-              this.cleanup()
+              await this.cleanup()
             }
           } catch (error) {
             console.error(`Error fetching channel ${mostUsersChannel}:`, error)
@@ -189,11 +189,14 @@ export class GuildSession {
     }
   }
 
-  cleanup() {
+  async cleanup() {
     console.log(`🧹💨✨ Disconnecting/cleaning up bot from ${this.guild.id}`)
-    this.voiceChannel = null
-    this.stopIdleTimer()
     try {
+      await this.musicPlayer.setAutoplay(false)
+      await this.musicPlayer.clearQueue()
+      await this.musicPlayer.skip()
+      this.voiceChannel = null
+      this.stopIdleTimer()
       this.connection?.destroy()
     } catch (err) {}
     this.connection = null
