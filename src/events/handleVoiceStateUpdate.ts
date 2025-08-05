@@ -1,10 +1,11 @@
 import { Events, VoiceState, VoiceChannel } from 'discord.js'
 import { ClientWithCommands } from '../ClientWithCommands'
 import { BOT_USER_ID } from '../constants'
-import { AudioPlayerStatus } from '@discordjs/voice'
+import { AudioPlayerStatus, EndBehaviorType } from '@discordjs/voice'
 import { getCurrentTimestamp } from '../helpers/formatterHelpers'
 import { GuildSession } from '../GuildSession'
 import { client } from '..'
+import { handleUserSpeaking } from '../helpers/voiceCommandHelpers/voiceCommandHelpers'
 
 export default {
   name: Events.VoiceStateUpdate,
@@ -60,6 +61,7 @@ export default {
       if (isBot) {
         if (!newChannel) return
         await session.joinVoiceChannel(newChannel.id)
+        await session.musicPlayer.subscribe()
 
         const members = newChannel?.members
         const nonBotMembers = members.filter((m) => !m.user.bot)

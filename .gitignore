@@ -28,3 +28,6 @@ config.dev.json
 config.prod.json
 
 TODO.txt
+
+venv/
+models/

@@ -12,6 +12,8 @@ import { Guild } from './backend/entities/Guild'
 import { getGuildMember } from './helpers/otherHelpers'
 import { getMostPopulatedVoiceChannels } from './helpers/voiceConnectionHelpers'
 import { UserStateManager } from './UserStateManager'
+import Websocket from 'ws'
+import { handleUserSpeaking } from './helpers/voiceCommandHelpers/voiceCommandHelpers'
 
 interface GuildSessionOptions {
   guild: Guild
@@ -25,6 +27,8 @@ export class GuildSession {
   guild: Guild
   musicBotTextChannel: TextChannel | null
   voiceChannel: VoiceBasedChannel | null
+  activeSpeakers: Map<string, any>
+  ws: Websocket | null
 
   connection: VoiceConnection | null
   musicPlayer: YoutubeMusicPlayer | null
@@ -36,6 +40,8 @@ export class GuildSession {
     this.guild = guild
     this.musicBotTextChannel = musicBotTextChannel ?? null
     this.voiceChannel = voiceChannel ?? null
+    this.activeSpeakers = new Map()
+    this.ws = null
 
     this.connection = connection ?? null
     this.musicPlayer = null
@@ -137,11 +143,53 @@ export class GuildSession {
 
       this.voiceChannel = voiceChannelToJoin
       this.connection = connection
+      this.initWebSocketConnection()
+
+      this.connection.receiver.speaking.on('start', (userId: string) => {
+        handleUserSpeaking(this, userId)
+      })
+
       return true
     } catch (error) {
       console.error(`[Voice] Failed to join voice channel in guild ${this.guild.id}:`, error)
       return false
     }
+  }
+
+  initWebSocketConnection() {
+    if (this.ws && this.ws.readyState === Websocket.OPEN) return
+
+    this.ws = new Websocket('ws://localhost:5025')
+
+    this.ws.on('open', () => {
+      console.log(`🔗 WebSocket connected to Python server`)
+    })
+
+    this.ws.on('message', (data, isBinary) => {
+      if (isBinary) return
+
+      try {
+        const result = JSON.parse(data.toString())
+        const { user: userId, text, is_final } = result
+
+        if (is_final) {
+          console.log(`[${userId}]: ${text}`)
+        } else if (text) {
+          process.stdout.write(`[${userId}][partial] ${text} \r`)
+        }
+      } catch (err) {
+        console.error(`❌ Failed to parse WebSocket message:`, err)
+      }
+    })
+
+    this.ws.on('close', () => {
+      console.log(`❌ WebSocket closed`)
+      this.ws = null
+    })
+
+    this.ws.on('error', (err: any) => {
+      console.error(`⚠️ WebSocket error:`, err.code)
+    })
   }
 
   async ensureVoiceConnection(userId: string): Promise<boolean> {
@@ -198,6 +246,8 @@ export class GuildSession {
       this.voiceChannel = null
       this.stopIdleTimer()
       this.connection?.destroy()
+      this.activeSpeakers = new Map()
+      this.ws.close()
     } catch (err) {}
     this.connection = null
   }

@@ -106,7 +106,7 @@ export class YoutubeMusicPlayer {
     })
   }
 
-  private subscribeToMusicPlayer(interaction?: any) {
+  subscribe(interaction?: any) {
     if (!this.session.connection) {
       console.log('aint no connection here')
       if (interaction) throw new Error('Dog is not in a voice channel.')
@@ -262,7 +262,7 @@ export class YoutubeMusicPlayer {
 
     try {
       await this.session.ensureVoiceConnection(userId)
-      this.subscribeToMusicPlayer()
+      this.subscribe()
       const track = await trackCtrl.ensureValidTrackDataOrUpsert(video, userId, this.session.guild.id)
       this.embedManager.setTrack({ track, userId })
       this.track = track
@@ -354,7 +354,7 @@ export class YoutubeMusicPlayer {
 
   async skip(userId: string = BOT_USER_ID) {
     try {
-      this.subscribeToMusicPlayer()
+      this.subscribe()
       await this.stop({ skip: true, skippedByUserId: userId })
     } catch (err) {
       throw new Error("Player isn't playing anything!")
@@ -372,7 +372,7 @@ export class YoutubeMusicPlayer {
 
   async unpause() {
     try {
-      this.subscribeToMusicPlayer()
+      this.subscribe()
       this.player.unpause()
     } catch {
       throw new Error("Player isn't playing anything!")

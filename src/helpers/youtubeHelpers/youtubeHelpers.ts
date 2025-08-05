@@ -200,13 +200,13 @@ export const createYoutubeAudioStream = (video: ExtendedTrack | FormattedYoutube
 
   audioStream.pipe(passThrough)
 
-  passThrough.on('data', (chunk) => {
-    console.log('Received audio chunk, size:', chunk.length)
-  })
+  // passThrough.on('data', (chunk) => {
+  //   console.log('Received audio chunk, size:', chunk.length)
+  // })
 
-  passThrough.on('end', () => {
-    console.log('Audio stream ended')
-  })
+  // passThrough.on('end', () => {
+  //   console.log('Audio stream ended')
+  // })
 
   return passThrough
 }

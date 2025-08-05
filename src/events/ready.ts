@@ -1,13 +1,6 @@
 import { Events } from 'discord.js'
 import { ClientWithCommands } from '../ClientWithCommands'
-
-import { client } from '..'
-import { fetchMessages } from '../helpers/otherHelpers'
-import { BOT_USER_ID, TEXT_CHANNELS } from '../constants'
-import { extractVideoDataFromMessage } from '../helpers/embedHelpers'
-import { trackCtrl } from '../backend/controllers/Controllers'
-import yts from 'yt-search'
-import { formatYTSFromIdSearch } from '../helpers/youtubeHelpers/ytsHelpers'
+import axios from 'axios'
 
 export default {
   name: Events.ClientReady,
@@ -21,6 +14,7 @@ export default {
 ╚══════════════════════════════════════════════════════════════════╝
       `)
     // await fetchModels()
+    // await transcriptionServerHealthCheck()
     console.log('\n* ════════════════════════════════════════════════════════════════ *\n')
   },
 }
@@ -34,3 +28,11 @@ const checkMemoryUsage = () => {
   }, 5000)
 }
 
+const transcriptionServerHealthCheck = async () => {
+  try {
+    const response = await axios.get('http://localhost:8080/health')
+    console.log('✅ Health check:', response.data)
+  } catch (err: any) {
+    console.error('❌ Health check failed:', err.message)
+  }
+}
